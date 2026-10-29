@@ -56,6 +56,9 @@ if (Test-Path $idx) {
   $c = $c.Replace('if (@$_GET[''c''] || @$_COOKIE[''c''] || @$_SESSION[''c'']) {', 'if (getenv(''BERIK_OFFLINE'')) { $_GET[''c''] = @mysqli_fetch_assoc(db::query("select id from company order by id limit 1"))[''id'']; }' + "`n   " + 'if (@$_GET[''c''] || @$_COOKIE[''c''] || @$_SESSION[''c'']) {')
   [IO.File]::WriteAllText($idx, $c, (New-Object Text.UTF8Encoding $false))
 }
+# «Кафе / Өзімен» ауыстырғышы: жылжитын фон (tp_seg_sl) тінтуірді ұстап қалмасын
+$bcss = Join-Path $site "assets\css\berik.css"
+if (Test-Path $bcss) { Add-Content -Path $bcss -Value "`n.tp_seg_sl, .tp_sl{ pointer-events: none; }" -Encoding UTF8 }
 # Google Fonts (Nunito) интернетсіз де көрінсін: шрифтті ішіне саламыз
 try {
   $ua = @{ "User-Agent" = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/109 Safari/537.36" }
