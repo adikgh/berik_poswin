@@ -91,7 +91,16 @@ namespace BerikPOS
             try { return !string.IsNullOrEmpty(CoreWebView2Environment.GetAvailableBrowserVersionString()); } catch { return false; }
         }
 
-        // Чек терезесі (order_print.php): көрінбейтін терезеде ашылып, принтерге тікелей шығып, өзі жабылады
+        // Чек принтері: программаның өз баптауы (Data\printer.txt). Бос болса — Windows-тың әдепкі принтері
+        static string PrinterFile => Path.Combine(Paths.Data, "printer.txt");
+        static string ChosenPrinter()
+        {
+            try { if (File.Exists(PrinterFile)) { var n = File.ReadAllText(PrinterFile).Trim(); if (n != "") return n; } } catch { }
+            try { return new PrinterSettings().PrinterName; } catch { return ""; }
+        }
+
+        // Чек терезесі (order_print.php): көрінбейтін терезеде ашылады, window.print() ұсталып,
+        // таңдалған принтерге диалогсыз шығарылады, сосын терезе өзі жабылады
         async void OnNewWindow(object sender, CoreWebView2NewWindowRequestedEventArgs e)
         {
             var def = e.GetDeferral();
@@ -99,23 +108,60 @@ namespace BerikPOS
             {
                 bool isPrint = e.Uri.Contains("print");
                 var f = new Form { Text = "Berik POS", ShowInTaskbar = !isPrint, StartPosition = FormStartPosition.Manual, Size = new Size(600, 700), Location = isPrint ? new Point(-3000, -3000) : new Point(Left + 100, Top + 60) };
-                if (isPrint) f.Opacity = 0;
                 var wv = new WebView2 { Dock = DockStyle.Fill };
                 f.Controls.Add(wv);
                 f.Show(this);
                 await wv.EnsureCoreWebView2Async(env);
-                wv.CoreWebView2.WindowCloseRequested += (s, a) => f.Close();
-                wv.CoreWebView2.NewWindowRequested += OnNewWindow;
+                var cw = wv.CoreWebView2;
+                cw.WindowCloseRequested += (s, a) => f.Close();
+                cw.NewWindowRequested += OnNewWindow;
                 if (isPrint)
                 {
-                    await wv.CoreWebView2.AddScriptToExecuteOnDocumentCreatedAsync("window.addEventListener('afterprint',function(){setTimeout(function(){window.close()},300)});");
-                    var t = new Timer { Interval = 20000 }; t.Tick += (s, a) => { t.Stop(); if (!f.IsDisposed) f.Close(); }; t.Start();
+                    await cw.AddScriptToExecuteOnDocumentCreatedAsync("window.__berikPrint=window.print;window.print=function(){try{window.chrome.webview.postMessage('print')}catch(e){window.__berikPrint()}};");
+                    bool done = false;
+                    cw.WebMessageReceived += async (s, a) =>
+                    {
+                        if (done || a.TryGetWebMessageAsString() != "print") return;
+                        done = true;
+                        await PrintSilent(cw);
+                        await Task.Delay(500);
+                        if (!f.IsDisposed) f.Close();
+                    };
+                    var t = new Timer { Interval = 30000 }; t.Tick += (s, a) => { t.Stop(); if (!f.IsDisposed) f.Close(); }; t.Start();
                 }
-                e.NewWindow = wv.CoreWebView2;
+                e.NewWindow = cw;
                 e.Handled = true;
             }
             catch (Exception ex) { Log.W("newwindow: " + ex.Message); }
             finally { def.Complete(); }
+        }
+
+        async Task PrintSilent(CoreWebView2 cw)
+        {
+            string printer = ChosenPrinter();
+            try
+            {
+                // Windows 10/11 (жаңа WebView2): нақты принтерге, диалогсыз
+                var ps = env.CreatePrintSettings();
+                if (!string.IsNullOrEmpty(printer)) ps.PrinterName = printer;
+                ps.ShouldPrintHeaderAndFooter = false;
+                ps.ShouldPrintBackgrounds = true;
+                ps.MarginTop = ps.MarginBottom = ps.MarginLeft = ps.MarginRight = 0;
+                var st = await cw.PrintAsync(ps);
+                Log.W($"print: {printer} -> {st}");
+                if (st == CoreWebView2PrintStatus.Succeeded) return;
+                if (st == CoreWebView2PrintStatus.PrinterUnavailable)
+                    MessageBox.Show(this, "Принтер табылмады: " + printer + "\n«Принтер» батырмасынан чек принтерін таңдаңыз.", "Berik POS", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                else
+                    MessageBox.Show(this, "Чек басылмады (" + st + "). Принтер қосулы ма, қағазы бар ма тексеріңіз.", "Berik POS", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+            catch (Exception ex)
+            {
+                // Ескі WebView2 (Windows 7/8): --kiosk-printing арқылы әдепкі принтерге
+                Log.W("print fallback: " + ex.Message);
+                try { await cw.ExecuteScriptAsync("window.__berikPrint()"); } catch { }
+                await Task.Delay(3000);
+            }
         }
 
         async Task Sync(string action, bool manual)
@@ -175,15 +221,49 @@ namespace BerikPOS
             if (agent == null) return;
             var st = await Task.Run(() => agent.Call("status", null, 15000));
             if (string.IsNullOrEmpty(lblNet.Text)) SetNet(false);
-            string printer = "";
-            try { printer = new PrinterSettings().PrinterName; } catch { }
+            string printer = ChosenPrinter();
             lblInfo.Text = $"Жүктелмеген заказ: {st.Int("pending")}   ·   Соңғы жүктеу: {st.Str("last_push") ?? "—"}   ·   Принтер: {(string.IsNullOrEmpty(printer) ? "таңдалмаған" : printer)}   ·   v{Program.Version}";
         }
 
         void OpenPrinters()
         {
-            MessageBox.Show(this, "Чек Windows-тағы «әдепкі» (по умолчанию) принтерге шығады.\nАшылған терезеде чек принтерін тінтуірдің оң жағымен басып, «Использовать по умолчанию» таңдаңыз.", "Принтер", MessageBoxButtons.OK, MessageBoxIcon.Information);
-            try { System.Diagnostics.Process.Start("control", "printers"); } catch { }
+            using (var f = new Form { Text = "Чек принтері", FormBorderStyle = FormBorderStyle.FixedDialog, MaximizeBox = false, MinimizeBox = false, StartPosition = FormStartPosition.CenterParent, ClientSize = new Size(420, 170), Font = new Font("Segoe UI", 10f) })
+            {
+                var cb = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Left = 20, Top = 45, Width = 380 };
+                foreach (string p in PrinterSettings.InstalledPrinters) cb.Items.Add(p);
+                cb.SelectedItem = ChosenPrinter();
+                var ok = new Button { Text = "Сақтау", Left = 20, Top = 100, Width = 120, Height = 34, DialogResult = DialogResult.OK };
+                var test = new Button { Text = "Сынақ чек", Left = 150, Top = 100, Width = 120, Height = 34 };
+                var win = new Button { Text = "Windows...", Left = 280, Top = 100, Width = 120, Height = 34 };
+                test.Click += async (s, e) => { Save(cb); await TestPrint(); };
+                win.Click += (s, e) => { try { System.Diagnostics.Process.Start("control", "printers"); } catch { } };
+                f.Controls.Add(new Label { Text = "Чек қай принтерге шықсын:", Left = 20, Top = 15, AutoSize = true });
+                f.Controls.AddRange(new Control[] { cb, ok, test, win });
+                f.AcceptButton = ok;
+                if (f.ShowDialog(this) == DialogResult.OK) Save(cb);
+            }
+            _ = Refresh2();
+        }
+
+        static void Save(ComboBox cb)
+        {
+            try { Directory.CreateDirectory(Paths.Data); File.WriteAllText(PrinterFile, cb.SelectedItem as string ?? ""); } catch { }
+        }
+
+        async Task TestPrint()
+        {
+            var f = new Form { ShowInTaskbar = false, StartPosition = FormStartPosition.Manual, Location = new Point(-3000, -3000), Size = new Size(400, 400) };
+            var wv = new WebView2 { Dock = DockStyle.Fill }; f.Controls.Add(wv); f.Show(this);
+            try
+            {
+                await wv.EnsureCoreWebView2Async(env);
+                var tcs = new TaskCompletionSource<bool>();
+                wv.CoreWebView2.NavigationCompleted += (s, e) => tcs.TrySetResult(true);
+                wv.CoreWebView2.NavigateToString("<html><body style='font-family:sans-serif;width:70mm;margin:0'><h3 style='text-align:center'>Berik POS</h3><p style='text-align:center'>Сынақ чек<br>" + DateTime.Now.ToString("dd.MM.yyyy HH:mm") + "</p><p style='text-align:center'>Принтер: " + System.Net.WebUtility.HtmlEncode(ChosenPrinter()) + "</p></body></html>");
+                await tcs.Task;
+                await PrintSilent(wv.CoreWebView2);
+            }
+            finally { await Task.Delay(500); f.Close(); }
         }
 
         async void OnClosing(object sender, FormClosingEventArgs e)
