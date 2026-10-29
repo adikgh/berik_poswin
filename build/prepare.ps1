@@ -59,6 +59,9 @@ if (Test-Path $idx) {
 # «Кафе / Өзімен» ауыстырғышы: жылжитын фон (tp_seg_sl) тінтуірді ұстап қалмасын
 $bcss = Join-Path $site "assets\css\berik.css"
 if (Test-Path $bcss) { Add-Content -Path $bcss -Value "`n.tp_seg_sl, .tp_sl{ pointer-events: none; }" -Encoding UTF8 }
+# Әдепкі түр (Кафе) CSS-пен бірінші тұрады, фон соның орнына жылжысын (әйтпесе керісінше көрінеді)
+$cjs = Join-Path $site "assets\js\cashbox.js"
+if (Test-Path $cjs) { [IO.File]::AppendAllText($cjs, [IO.File]::ReadAllText((Join-Path $PSScriptRoot "tpfix.js")), (New-Object Text.UTF8Encoding $false)) }
 # Google Fonts (Nunito) интернетсіз де көрінсін: шрифтті ішіне саламыз
 try {
   $ua = @{ "User-Agent" = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/109 Safari/537.36" }
