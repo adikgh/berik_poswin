@@ -1,0 +1,52 @@
+name: build
+
+# v1.2.3 тегін push етсе: Setup.exe жиналып, Release-ке шығады (программа сол жерден өзі жаңарады).
+# Қолмен де іске қосуға болады (Actions → build → Run workflow), сонда тек artifact болады.
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Version
+        id: v
+        shell: pwsh
+        run: |
+          $v = if ($env:GITHUB_REF_TYPE -eq 'tag') { $env:GITHUB_REF_NAME.TrimStart('v') } else { '0.0.' + $env:GITHUB_RUN_NUMBER }
+          "ver=$v" >> $env:GITHUB_OUTPUT
+          (Get-Content src/BerikPOS/BerikPOS.csproj) -replace '<Version>[^<]+</Version>', "<Version>$v</Version>" | Set-Content src/BerikPOS/BerikPOS.csproj
+          (Get-Content src/BerikPOS/Program.cs) -replace 'Version = "[^"]+"', "Version = `"$v`"" | Set-Content src/BerikPOS/Program.cs
+          (Get-Content www/local/lib.php) -replace "APP_VER = '[^']+'", "APP_VER = '$v'" | Set-Content www/local/lib.php
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Prepare (PHP, MariaDB, касса сайты)
+        shell: pwsh
+        run: ./build/prepare.ps1 -Server "${{ vars.BERIK_SERVER }}"
+
+      - name: Inno Setup
+        shell: pwsh
+        run: |
+          if (!(Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) { choco install innosetup -y --no-progress }
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" /DAppVer=${{ steps.v.outputs.ver }} installer\BerikPOS.iss
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: BerikPOS-Setup-${{ steps.v.outputs.ver }}
+          path: out/*.exe
+
+      - name: Release
+        if: github.ref_type == 'tag'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: out/*.exe

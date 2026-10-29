@@ -1,0 +1,6 @@
+dist/
+tmp/
+out/
+bin/
+obj/
+installer/MicrosoftEdgeWebview2Setup.exe
