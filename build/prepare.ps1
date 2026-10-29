@@ -62,6 +62,13 @@ if (Test-Path $bcss) { Add-Content -Path $bcss -Value "`n.tp_seg_sl, .tp_sl{ poi
 # Әдепкі түр (Кафе) CSS-пен бірінші тұрады, фон соның орнына жылжысын (әйтпесе керісінше көрінеді)
 $cjs = Join-Path $site "assets\js\cashbox.js"
 if (Test-Path $cjs) { [IO.File]::AppendAllText($cjs, [IO.File]::ReadAllText((Join-Path $PSScriptRoot "tpfix.js")), (New-Object Text.UTF8Encoding $false)) }
+# Тип сүзгісі мен карточкадағы тип батырмалары: тек компанияда қосулы түрлер (офлайнда жеткізу өшік, локал базада бір компания)
+$tq = 'select * from retail_orders_type order by number asc'
+$tn = 'select * from retail_orders_type where (id = 1 and (select delivery from company limit 1) = 1) or (id = 2 and (select yourself from company limit 1) = 1) or (id = 4 and (select coffee from company limit 1) = 1) or (id = 3 and (select service from company limit 1) = 1) order by number asc'
+foreach ($f in @("orders\index.php", "orders\card.php")) {
+  $fp = Join-Path $site $f
+  if (Test-Path $fp) { $c = [IO.File]::ReadAllText($fp); if (!$c.Contains($tq)) { Write-Warning "type patch: $f" }; [IO.File]::WriteAllText($fp, $c.Replace($tq, $tn), (New-Object Text.UTF8Encoding $false)) }
+}
 # Google Fonts (Nunito) интернетсіз де көрінсін: шрифтті ішіне саламыз
 try {
   $ua = @{ "User-Agent" = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/109 Safari/537.36" }
