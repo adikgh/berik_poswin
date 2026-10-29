@@ -18,7 +18,7 @@ Windows 7 SP1, 8, 10, 11 (64-бит).
 - SQL: `server/berik_offline_server.sql` (company_device, offline_uuid бағандары).
 
 ## Жинау және шығару
-- `v1.0.0` тегін push етсе, GitHub Actions `BerikPOS-Setup-1.0.0.exe` жасап, Release-ке шығарады.
+- `VERSION` файлындағы нөмірді өзгертіп main-ға push жасаса (немесе `v1.0.0` тегін push етсе), GitHub Actions `BerikPOS-Setup-x.y.z.exe` жасап, Release-ке шығарады.
   Орнатылған программалар жаңа нұсқаны өздері тауып, жаңартады.
 - Сервер адресін алдын ала қою: репо Settings → Variables → `BERIK_SERVER` (мысалы `https://pos.example.kz`).
 

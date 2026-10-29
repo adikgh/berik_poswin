@@ -1,9 +1,11 @@
 name: build
 
-# v1.2.3 тегін push етсе: Setup.exe жиналып, Release-ке шығады (программа сол жерден өзі жаңарады).
-# Қолмен де іске қосуға болады (Actions → build → Run workflow), сонда тек artifact болады.
+# Жаңа нұсқа шығару: VERSION файлындағы нөмірді өзгертіп, main-ға push жасау (немесе v1.2.3 тегін push).
+# Setup.exe жиналып, v<VERSION> Release-і жасалады, орнатылған программалар сол жерден өзі жаңарады.
 on:
   push:
+    branches: [main]
+    paths: ['VERSION']
     tags: ['v*']
   workflow_dispatch:
 
@@ -20,7 +22,7 @@ jobs:
         id: v
         shell: pwsh
         run: |
-          $v = if ($env:GITHUB_REF_TYPE -eq 'tag') { $env:GITHUB_REF_NAME.TrimStart('v') } else { '0.0.' + $env:GITHUB_RUN_NUMBER }
+          $v = if ($env:GITHUB_REF_TYPE -eq 'tag') { $env:GITHUB_REF_NAME.TrimStart('v') } else { (Get-Content VERSION -Raw).Trim() }
           "ver=$v" >> $env:GITHUB_OUTPUT
           (Get-Content src/BerikPOS/BerikPOS.csproj) -replace '<Version>[^<]+</Version>', "<Version>$v</Version>" | Set-Content src/BerikPOS/BerikPOS.csproj
           (Get-Content src/BerikPOS/Program.cs) -replace 'Version = "[^"]+"', "Version = `"$v`"" | Set-Content src/BerikPOS/Program.cs
@@ -46,7 +48,8 @@ jobs:
           path: out/*.exe
 
       - name: Release
-        if: github.ref_type == 'tag'
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: v${{ steps.v.outputs.ver }}
+          target_commitish: ${{ github.sha }}
           files: out/*.exe
