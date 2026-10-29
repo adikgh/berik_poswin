@@ -16,7 +16,7 @@
 			ensure_local_cols();
 			$pending = (int)@row("SELECT count(*) c FROM retail_orders WHERE paid = 1 AND (synced_at IS NULL OR sync_hash IS NULL)")['c'];
 		} catch (Throwable $e) {}
-		out(['ok' => true, 'ver' => APP_VER, 'linked' => !empty($s['token']), 'server' => @$s['server'], 'branch_id' => @$s['branch_id'],
+		out(['ok' => true, 'ver' => APP_VER, 'linked' => !empty($s['token']), 'server' => @$s['server'], 'company_id' => @$s['company_id'], 'branch_id' => @$s['branch_id'],
 			'last_push' => @$s['last_push'], 'last_pull' => @$s['last_pull'], 'pending' => $pending]);
 	}
 
