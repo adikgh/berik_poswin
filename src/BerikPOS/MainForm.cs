@@ -59,8 +59,6 @@ namespace BerikPOS
                 {
                     using (var f = new SetupForm(agent)) if (f.ShowDialog(this) != DialogResult.OK) { Close(); return; }
                 }
-                st = await Task.Run(() => agent.Call("status"));
-                int company = st.Int("company_id");
 
                 splash.Text = "Терезе ашылуда...";
                 string fixedRt = Path.Combine(Paths.App, "webview2"); // Windows 7/8 үшін ішіне салынған runtime
@@ -72,8 +70,7 @@ namespace BerikPOS
                 cw.Settings.AreDevToolsEnabled = false;
                 cw.Settings.IsZoomControlEnabled = true;
                 cw.NewWindowRequested += OnNewWindow;
-                // Касса кіру беті компанияны ?c= арқылы біледі (cookie-ге сақтайды)
-                cw.Navigate($"http://127.0.0.1:{engine.SitePort}/" + (company > 0 ? "?c=" + company : ""));
+                cw.Navigate($"http://127.0.0.1:{engine.SitePort}/");
                 splash.Visible = false; web.Visible = true; bar.Visible = true;
                 await Refresh2();
                 timer.Start();

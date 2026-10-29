@@ -48,6 +48,14 @@ if (Test-Path $loy) {
   $c = $c -replace "public static function on\(\) \{", "public static function on() {`n`t`t`tif (getenv('BERIK_OFFLINE')) return false;"
   [IO.File]::WriteAllText($loy, $c, (New-Object Text.UTF8Encoding $false))
 }
+# Офлайнда компания бірінші кіргенде таңдалған (базада біреу ғана), сондықтан ?c= сілтемесі керек емес:
+# кіру беті компанияны жергілікті базадан өзі алады
+$idx = Join-Path $site "index.php"
+if (Test-Path $idx) {
+  $c = [IO.File]::ReadAllText($idx)
+  $c = $c.Replace('if (@$_GET[''c''] || @$_COOKIE[''c''] || @$_SESSION[''c'']) {', 'if (getenv(''BERIK_OFFLINE'')) { $_GET[''c''] = @mysqli_fetch_assoc(db::query("select id from company order by id limit 1"))[''id'']; }' + "`n   " + 'if (@$_GET[''c''] || @$_COOKIE[''c''] || @$_SESSION[''c'']) {')
+  [IO.File]::WriteAllText($idx, $c, (New-Object Text.UTF8Encoding $false))
+}
 # Google Fonts (Nunito) интернетсіз де көрінсін: шрифтті ішіне саламыз
 try {
   $ua = @{ "User-Agent" = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/109 Safari/537.36" }
