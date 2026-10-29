@@ -12,7 +12,7 @@ namespace BerikPOS
     class SetupForm : Form
     {
         readonly Agent agent;
-        readonly TextBox server = new TextBox(), phone = new TextBox(), code = new TextBox { UseSystemPasswordChar = true };
+        readonly TextBox server = new TextBox(), code = new TextBox { MaxLength = 10 };
         readonly ComboBox branch = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Visible = false };
         readonly Label branchLbl = new Label { Text = "Точка:", Visible = false, AutoSize = true };
         readonly Label msg = new Label { AutoSize = false, Height = 40, ForeColor = Color.FromArgb(190, 50, 40) };
@@ -29,10 +29,9 @@ namespace BerikPOS
 
             var p = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(24), ColumnCount = 1 };
             Label L(string t) => new Label { Text = t, AutoSize = true, Margin = new Padding(0, 8, 0, 2) };
-            p.Controls.Add(new Label { Text = "Бірінші рет интернетпен кіру керек. Кейін касса интернетсіз де жұмыс істейді.", AutoSize = false, Height = 44, Width = 370 });
+            p.Controls.Add(new Label { Text = "Бірінші рет интернетпен кіру керек. Компания кодын енгізіңіз, кейін кассирлер өз PIN-кодымен кіреді, интернетсіз де.", AutoSize = false, Height = 44, Width = 370 });
             p.Controls.Add(L("Сервер адресі:")); p.Controls.Add(server);
-            p.Controls.Add(L("Телефон:")); p.Controls.Add(phone);
-            p.Controls.Add(L("PIN-код (кассаға кіретін код):")); p.Controls.Add(code);
+            p.Controls.Add(L("Компания коды (мысалы: n135):")); p.Controls.Add(code);
             p.Controls.Add(branchLbl); p.Controls.Add(branch);
             p.Controls.Add(msg); p.Controls.Add(ok);
             foreach (Control c in p.Controls) if (!(c is Label)) c.Width = 370;
@@ -56,7 +55,7 @@ namespace BerikPOS
             msg.Text = ""; ok.Enabled = false; ok.Text = "Жүктелуде... (бірнеше минут болуы мүмкін)"; UseWaitCursor = true;
             try
             {
-                var body = new Dictionary<string, object> { ["server"] = server.Text.Trim(), ["phone"] = phone.Text.Trim(), ["code"] = code.Text.Trim() };
+                var body = new Dictionary<string, object> { ["server"] = server.Text.Trim(), ["company_code"] = code.Text.Trim() };
                 if (branch.Visible && branch.SelectedItem is KeyValuePair<int, string> kv) body["branch_id"] = kv.Key;
                 var r = await Task.Run(() => agent.Call("setup", body));
                 if (r.Bool("ok")) { DialogResult = DialogResult.OK; Close(); return; }

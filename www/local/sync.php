@@ -1,6 +1,6 @@
 <?php
 	// Жергілікті синхрон: ?a=status | setup | menu | push | auto
-	//  setup — бірінші кіру (сервер, телефон, PIN) + бүкіл деректі тарту
+	//  setup — бірінші кіру (сервер, компанияның 4 санды коды, точка) + бүкіл деректі тарту
 	//  menu  — менюді (анықтамалықтарды) серверден қайта тарту
 	//  push  — офлайн жазбаларды серверге жүктеу (батырма)
 	//  auto  — байланыс сапасын тексеріп, жақсы болса push (программа өзі шақырады)
@@ -24,7 +24,7 @@
 		$server = trim((string)@$in['server']);
 		if (!preg_match('#^https?://[a-z0-9.\-]+(:\d+)?(/.*)?$#i', $server)) fail('bad_server');
 		$s = settings(); $s['server'] = rtrim($server, '/'); unset($s['token']); save_settings($s);
-		$r = api('login.php', ['phone' => @$in['phone'], 'code' => @$in['code'], 'branch_id' => (int)@$in['branch_id'], 'device_name' => gethostname()]);
+		$r = api('login.php', ['company_code' => @$in['company_code'], 'branch_id' => (int)@$in['branch_id'], 'device_name' => gethostname()]);
 		if (!$r['json']) fail('no_connection', 502, ['detail' => $r['err']]);
 		if (!@$r['json']['ok']) out($r['json'], 400);
 		$s['token'] = $r['json']['token']; $s['device_id'] = $r['json']['device_id'];

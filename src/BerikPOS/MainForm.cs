@@ -154,9 +154,9 @@ namespace BerikPOS
             {
                 case "no_connection": return "интернет жоқ немесе сервер жауап бермейді";
                 case "weak_net": return "интернет әлсіз";
-                case "bad_login": return "телефон немесе PIN-код қате";
-                case "no_offline_branch": return "бұл компанияда офлайн точка белгіленбеген (админде)";
-                case "branch_not_offline": return "филиал офлайн точка емес";
+                case "bad_code": return "компания коды қате";
+                case "bad_input": return "компания кодын енгізіңіз";
+                case "no_branch": case "branch_not_found": return "компанияда точка табылмады";
                 case "bad_token": case "no_token": return "касса серверде өшірілген, қайта байлау керек";
                 case "too_many": return "тым көп қате әрекет, 10 минуттан кейін қайталаңыз";
                 case "busy": return "синхрон жүріп жатыр";

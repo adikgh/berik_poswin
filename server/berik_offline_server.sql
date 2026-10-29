@@ -37,6 +37,3 @@ ALTER TABLE `retail_shifts`
 ALTER TABLE `retail_orders_log`
   ADD COLUMN IF NOT EXISTS `offline_uuid` CHAR(36) NULL,
   ADD UNIQUE INDEX IF NOT EXISTS `offline_uuid` (`offline_uuid`);
-
--- 4) Кафе основной филиалын офлайн точка етіп белгілеу (id-ін тексеріп қойыңыз)
--- UPDATE `company_branch` SET `offline` = 1 WHERE `name` LIKE '%основной%';
