@@ -23,10 +23,11 @@
 	if ($a == 'setup') {
 		$server = trim((string)@$in['server']);
 		if (!preg_match('#^https?://[a-z0-9.\-]+(:\d+)?(/.*)?$#i', $server)) fail('bad_server');
-		$s = settings(); $s['server'] = rtrim($server, '/'); unset($s['token']); save_settings($s);
+		// Сервер ауыстырғанда кіру сәтсіз болса, ескі байланыс сақталып қалады
+		$old = settings(); $s = $old; $s['server'] = rtrim($server, '/'); unset($s['token']); save_settings($s);
 		$r = api('login.php', ['company_code' => @$in['company_code'], 'branch_id' => (int)@$in['branch_id'], 'device_name' => gethostname()]);
-		if (!$r['json']) fail('no_connection', 502, ['detail' => $r['err']]);
-		if (!@$r['json']['ok']) out($r['json'], 400);
+		if (!$r['json']) { save_settings($old); fail('no_connection', 502, ['detail' => $r['err']]); }
+		if (!@$r['json']['ok']) { save_settings($old); out($r['json'], 400); }
 		$s['token'] = $r['json']['token']; $s['device_id'] = $r['json']['device_id'];
 		$s['company_id'] = $r['json']['company_id']; $s['branch_id'] = $r['json']['branch_id'];
 		save_settings($s);

@@ -18,7 +18,7 @@ namespace BerikPOS
         readonly Label msg = new Label { AutoSize = false, Height = 40, ForeColor = Color.FromArgb(190, 50, 40) };
         readonly Button ok = new Button { Text = "Кіру және деректі жүктеу", Height = 38 };
 
-        public SetupForm(Agent a)
+        public SetupForm(Agent a, string currentServer = null)
         {
             agent = a;
             Text = "Berik POS — кассаны байлау";
@@ -39,7 +39,7 @@ namespace BerikPOS
             Controls.Add(p);
             AcceptButton = ok;
 
-            server.Text = DefaultServer();
+            server.Text = string.IsNullOrEmpty(currentServer) ? DefaultServer() : currentServer;
             ok.Click += async (s, e) => await Go();
         }
 

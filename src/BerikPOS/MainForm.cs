@@ -34,6 +34,7 @@ namespace BerikPOS
             Button B(string t, EventHandler h) { var b = new Button { Text = t, Dock = DockStyle.Right, Width = 150, FlatStyle = FlatStyle.Flat, Font = new Font("Segoe UI", 9.5f) }; b.FlatAppearance.BorderSize = 0; b.Click += h; return b; }
             bar.Controls.Add(lblInfo);
             bar.Controls.Add(lblNet);
+            bar.Controls.Add(B("Сервер", async (s, e) => await ChangeServer()));
             bar.Controls.Add(B("Принтер", (s, e) => OpenPrinters()));
             bar.Controls.Add(B("Менюді жаңарту", async (s, e) => await Sync("menu", true)));
             bar.Controls.Add(B("Серверге жүктеу", async (s, e) => await Sync("push", true)));
@@ -225,7 +226,28 @@ namespace BerikPOS
             var st = await Task.Run(() => agent.Call("status", null, 15000));
             if (string.IsNullOrEmpty(lblNet.Text)) SetNet(false);
             string printer = ChosenPrinter();
-            lblInfo.Text = $"Жүктелмеген заказ: {st.Int("pending")}   ·   Соңғы жүктеу: {st.Str("last_push") ?? "—"}   ·   Принтер: {(string.IsNullOrEmpty(printer) ? "таңдалмаған" : printer)}   ·   v{Program.Version}";
+            lblInfo.Text = $"Сервер: {st.Str("server")}   ·   Жүктелмеген заказ: {st.Int("pending")}   ·   Соңғы жүктеу: {st.Str("last_push") ?? "—"}   ·   Принтер: {(string.IsNullOrEmpty(printer) ? "таңдалмаған" : printer)}   ·   v{Program.Version}";
+        }
+
+        // Орнатқаннан кейін де серверді ауыстыруға болады (мысалы, локал сервер → интернеттегі сервер)
+        async Task ChangeServer()
+        {
+            if (agent == null) return;
+            if (syncing) { MessageBox.Show(this, "Синхрон жүріп жатыр, біраз күтіңіз.", "Berik POS"); return; }
+            var st = await Task.Run(() => agent.Call("status", null, 15000));
+            string cur = st.Str("server") ?? "";
+            int pending = st.Int("pending");
+            string q = "Қазіргі сервер: " + cur + "\n\n";
+            if (pending > 0) q += "Жүктелмеген заказ: " + pending + ". Олар жаңа серверге жүктеледі. Ескі серверге керек болса, алдымен «Серверге жүктеу» басыңыз.\n\n";
+            q += "Серверді ауыстырасыз ба? Меню жаңа серверден қайта жүктеледі, жергілікті заказдар өшпейді.";
+            if (MessageBox.Show(this, q, "Серверді ауыстыру", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
+            timer.Stop();
+            try
+            {
+                using (var f = new SetupForm(agent, cur))
+                    if (f.ShowDialog(this) == DialogResult.OK) web.CoreWebView2?.Reload();
+            }
+            finally { timer.Start(); await Refresh2(); }
         }
 
         void OpenPrinters()
