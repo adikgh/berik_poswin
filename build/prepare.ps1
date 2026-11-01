@@ -18,21 +18,21 @@ New-Item -ItemType Directory -Force -Path $dist, $tmp | Out-Null
 
 function Get-File($url, $out) { if (!(Test-Path $out)) { Write-Host "download $url"; Invoke-WebRequest -Uri $url -OutFile $out -UseBasicParsing } }
 
-# --- PHP (NTS x64) ---
+# --- PHP (NTS x86): 32-бит, Windows 7 32/64-бит бәрінде жүреді ---
 $rel = Invoke-RestMethod "https://windows.php.net/downloads/releases/releases.json"
 $php = $rel.$PhpMinor
-$zipName = ($php.PSObject.Properties | Where-Object { $_.Name -like "nts-vs*-x64" } | Select-Object -First 1).Value.zip.path
+$zipName = ($php.PSObject.Properties | Where-Object { $_.Name -like "nts-vs*-x86" } | Select-Object -First 1).Value.zip.path
 $phpZip = Join-Path $tmp $zipName
 try { Get-File "https://windows.php.net/downloads/releases/$zipName" $phpZip } catch { Get-File "https://windows.php.net/downloads/releases/archives/$zipName" $phpZip }
 Expand-Archive $phpZip (Join-Path $dist "php")
 Get-File "https://curl.se/ca/cacert.pem" (Join-Path $dist "php\cacert.pem")
 Remove-Item (Join-Path $dist "php\*.pdb"), (Join-Path $dist "php\dev"), (Join-Path $dist "php\extras") -Recurse -Force -ErrorAction SilentlyContinue
 
-# --- MariaDB (x64 zip) ---
-$mz = Join-Path $tmp "mariadb-$MariaVer-winx64.zip"
-Get-File "https://archive.mariadb.org/mariadb-$MariaVer/winx64-packages/mariadb-$MariaVer-winx64.zip" $mz
+# --- MariaDB (32-бит zip) ---
+$mz = Join-Path $tmp "mariadb-$MariaVer-win32.zip"
+Get-File "https://archive.mariadb.org/mariadb-$MariaVer/win32-packages/mariadb-$MariaVer-win32.zip" $mz
 Expand-Archive $mz $tmp -Force
-Move-Item (Join-Path $tmp "mariadb-$MariaVer-winx64") (Join-Path $dist "mariadb")
+Move-Item (Join-Path $tmp "mariadb-$MariaVer-win32") (Join-Path $dist "mariadb")
 foreach ($d in "mysql-test", "sql-bench", "include", "lib\*.lib", "data") { Remove-Item (Join-Path $dist "mariadb\$d") -Recurse -Force -ErrorAction SilentlyContinue }
 Get-ChildItem (Join-Path $dist "mariadb") -Recurse -Include *.pdb | Remove-Item -Force
 
@@ -94,5 +94,8 @@ if ($Server) { Set-Content -Path (Join-Path $dist "server.txt") -Value $Server -
 
 # --- WebView2 (Windows 10/11-де бар; жоқ болса орнатқыш өзі орнатады) ---
 Get-File "https://go.microsoft.com/fwlink/p/?LinkId=2124703" (Join-Path $root "installer\MicrosoftEdgeWebview2Setup.exe")
+# Windows 7-де жиі жоқ: PHP-ге VC++ runtime (x86) және программаға .NET Framework 4.8 (web орнатқыш)
+Get-File "https://aka.ms/vs/17/release/vc_redist.x86.exe" (Join-Path $root "installer\vc_redist.x86.exe")
+Get-File "https://go.microsoft.com/fwlink/?LinkId=2085155" (Join-Path $root "installer\ndp48-web.exe")
 
 Write-Host "dist ready:" (Get-ChildItem $dist -Recurse | Measure-Object -Property Length -Sum).Sum
