@@ -29,8 +29,14 @@ Get-File "https://curl.se/ca/cacert.pem" (Join-Path $dist "php\cacert.pem")
 Remove-Item (Join-Path $dist "php\*.pdb"), (Join-Path $dist "php\dev"), (Join-Path $dist "php\extras") -Recurse -Force -ErrorAction SilentlyContinue
 
 # --- MariaDB (32-бит zip) ---
-$mz = Join-Path $tmp "mariadb-$MariaVer-win32.zip"
-Get-File "https://archive.mariadb.org/mariadb-$MariaVer/win32-packages/mariadb-$MariaVer-win32.zip" $mz
+# 32-бит пакеттер кейінгі нұсқаларда жоқ, сондықтан бар болғанын іздейміз
+$mz = $null
+foreach ($mv in @($MariaVer, "10.4.33", "10.4.32", "10.4.31", "10.4.30", "10.4.28", "10.4.26", "10.4.24", "10.4.22", "10.4.20", "10.4.18", "10.3.39", "10.3.37")) {
+  $f = Join-Path $tmp "mariadb-$mv-win32.zip"
+  try { Get-File "https://archive.mariadb.org/mariadb-$mv/win32-packages/mariadb-$mv-win32.zip" $f; $mz = $f; $MariaVer = $mv; break } catch { Write-Host "no win32 package: $mv" }
+}
+if (!$mz) { throw "MariaDB win32 package not found" }
+Write-Host "MariaDB $MariaVer (win32)"
 Expand-Archive $mz $tmp -Force
 Move-Item (Join-Path $tmp "mariadb-$MariaVer-win32") (Join-Path $dist "mariadb")
 foreach ($d in "mysql-test", "sql-bench", "include", "lib\*.lib", "data") { Remove-Item (Join-Path $dist "mariadb\$d") -Recurse -Force -ErrorAction SilentlyContinue }
