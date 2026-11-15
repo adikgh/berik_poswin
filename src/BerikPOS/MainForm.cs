@@ -104,6 +104,14 @@ namespace BerikPOS
         // таңдалған принтерге диалогсыз шығарылады, сосын терезе өзі жабылады
         async void OnNewWindow(object sender, CoreWebView2NewWindowRequestedEventArgs e)
         {
+            // «Жаңа касса ашу» (/cashbox/?cart=new) сайтта жаңа вкладкада ашылады; программада сол терезеде ашамыз,
+            // кассалар арасында беттегі Касса-1, Касса-2 ... табтарымен ауысады
+            if (!e.Uri.Contains("print") && e.Uri.Contains("/cashbox/") && sender is CoreWebView2 own)
+            {
+                e.Handled = true;
+                own.Navigate(e.Uri);
+                return;
+            }
             var def = e.GetDeferral();
             try
             {

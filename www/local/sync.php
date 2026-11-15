@@ -45,7 +45,11 @@
 		$n = net_quality();
 		if (!$n['good']) out(['ok' => false, 'error' => 'weak_net', 'net' => $n]);
 		$lock = lock();
-		out(['net' => $n] + push());
+		$r = ['net' => $n] + push();
+		// Программа жаңарғаннан кейін бір рет менюді (құрылым + анықтамалықтар) қайта тартамыз:
+		// сайттағы жаңа бағандар мен кестелер (мысалы, бірнеше касса, акциялар, чек баптауы, аудармалар) кассаға жетеді
+		if (@$s['pull_ver'] !== APP_VER) { try { $r['pull'] = pull(); } catch (Throwable $e) { $r['pull'] = ['ok' => false, 'error' => $e->getMessage()]; } }
+		out($r);
 	}
 	fail('bad_action');
 
@@ -127,7 +131,7 @@
 		q("SET FOREIGN_KEY_CHECKS = 1");
 		ensure_local_cols();
 
-		$s = settings(); $s['last_pull'] = date('Y-m-d H:i:s'); save_settings($s);
+		$s = settings(); $s['last_pull'] = date('Y-m-d H:i:s'); $s['pull_ver'] = APP_VER; save_settings($s);
 		return ['ok' => true, 'pulled' => array_map('count', $j['data']), 'time' => $s['last_pull']];
 	}
 
