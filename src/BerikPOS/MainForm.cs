@@ -104,21 +104,19 @@ namespace BerikPOS
         // таңдалған принтерге диалогсыз шығарылады, сосын терезе өзі жабылады
         async void OnNewWindow(object sender, CoreWebView2NewWindowRequestedEventArgs e)
         {
+            // «Жаңа касса ашу» / «+» (/cashbox/?cart=new): сайтта жаңа вкладкада ашылады; программада жаңа терезе
+            // ашпаймыз (терезелер үсті-үстіне жиналмасын) — сол терезеде жаңа кассаға ауысады (user 2026-11-18)
+            if (!e.Uri.Contains("print") && e.Uri.Contains("/cashbox/") && sender is CoreWebView2 own)
+            {
+                e.Handled = true;
+                own.Navigate(e.Uri);
+                return;
+            }
             var def = e.GetDeferral();
             try
             {
                 bool isPrint = e.Uri.Contains("print");
-                // «Жаңа касса ашу» / «+» (/cashbox/?cart=new): сайттағыдай бірден жаңа бетте ашылады — программада
-                // бөлек толық терезе (Windows тапсырмалар жолағында көрінеді). Әр терезе өз кассасында тұрады (?cart=N).
-                bool isCash = !isPrint && e.Uri.Contains("/cashbox/");
                 var f = new Form { Text = "Berik POS", ShowInTaskbar = !isPrint, StartPosition = FormStartPosition.Manual, Size = new Size(600, 700), Location = isPrint ? new Point(-3000, -3000) : new Point(Left + 100, Top + 60) };
-                if (isCash)
-                {
-                    f.Icon = Icon;
-                    f.Size = WindowState == FormWindowState.Normal ? Size : RestoreBounds.Size;
-                    f.Location = new Point(Left + 40, Top + 40);
-                    f.WindowState = WindowState == FormWindowState.Minimized ? FormWindowState.Normal : WindowState;
-                }
                 if (isPrint) { f.FormBorderStyle = FormBorderStyle.None; f.Opacity = 0; } // чек терезесі көрінбейді
                 var wv = new WebView2 { Dock = DockStyle.Fill };
                 f.Controls.Add(wv);
