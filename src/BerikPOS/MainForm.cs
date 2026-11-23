@@ -100,6 +100,14 @@ namespace BerikPOS
             try { return new PrinterSettings().PrinterName; } catch { return ""; }
         }
 
+        // Кухня чегінің принтері (Data\printer_kc.txt). Бос болса — чек принтерімен бірдей
+        static string KitchenFile => Path.Combine(Paths.Data, "printer_kc.txt");
+        static string KitchenPrinter()
+        {
+            try { if (File.Exists(KitchenFile)) { var n = File.ReadAllText(KitchenFile).Trim(); if (n != "") return n; } } catch { }
+            return ChosenPrinter();
+        }
+
         // Чек терезесі (order_print.php): көрінбейтін терезеде ашылады, window.print() ұсталып,
         // таңдалған принтерге диалогсыз шығарылады, сосын терезе өзі жабылады
         async void OnNewWindow(object sender, CoreWebView2NewWindowRequestedEventArgs e)
@@ -133,7 +141,7 @@ namespace BerikPOS
                     {
                         if (done || a.TryGetWebMessageAsString() != "print") return;
                         done = true;
-                        await PrintSilent(cw);
+                        await PrintSilent(cw, e.Uri.Contains("kind=kitchen")); // кухня чегі — кухня принтеріне
                         await Task.Delay(500);
                         if (!f.IsDisposed) f.Close();
                     };
@@ -146,11 +154,11 @@ namespace BerikPOS
             finally { def.Complete(); }
         }
 
-        async Task PrintSilent(CoreWebView2 cw)
+        async Task PrintSilent(CoreWebView2 cw, bool kitchen = false)
         {
             // Принтер әлі таңдалмаса — бірінші рет таңдатамыз
             if (!File.Exists(PrinterFile)) OpenPrinters();
-            string printer = ChosenPrinter();
+            string printer = kitchen ? KitchenPrinter() : ChosenPrinter();
             try
             {
                 // Windows 10/11 (жаңа WebView2): нақты принтерге, диалогсыз
@@ -234,6 +242,7 @@ namespace BerikPOS
             var st = await Task.Run(() => agent.Call("status", null, 15000));
             if (string.IsNullOrEmpty(lblNet.Text)) SetNet(false);
             string printer = ChosenPrinter();
+            if (File.Exists(KitchenFile) && KitchenPrinter() != printer) printer += "  ·  Кухня: " + KitchenPrinter();
             lblInfo.Text = $"Сервер: {st.Str("server")}   ·   Жүктелмеген заказ: {st.Int("pending")}   ·   Соңғы жүктеу: {st.Str("last_push") ?? "—"}   ·   Принтер: {(string.IsNullOrEmpty(printer) ? "таңдалмаған" : printer)}   ·   v{Program.Version}";
         }
 
@@ -260,30 +269,45 @@ namespace BerikPOS
 
         void OpenPrinters()
         {
-            using (var f = new Form { Text = "Чек принтері", FormBorderStyle = FormBorderStyle.FixedDialog, MaximizeBox = false, MinimizeBox = false, StartPosition = FormStartPosition.CenterParent, ClientSize = new Size(460, 170), Font = new Font("Segoe UI", 10f) })
+            const string Same = "(клиент чегінің принтері)";
+            using (var f = new Form { Text = "Чек принтері", FormBorderStyle = FormBorderStyle.FixedDialog, MaximizeBox = false, MinimizeBox = false, StartPosition = FormStartPosition.CenterParent, ClientSize = new Size(460, 250), Font = new Font("Segoe UI", 10f) })
             {
-                var cb = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Left = 20, Top = 45, Width = 380 };
+                var cb = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Left = 20, Top = 40, Width = 380 };
                 foreach (string p in PrinterSettings.InstalledPrinters) cb.Items.Add(p);
                 cb.SelectedItem = ChosenPrinter();
-                var ok = new Button { Text = "Сақтау", Left = 20, Top = 100, Width = 120, Height = 34, DialogResult = DialogResult.OK };
-                var test = new Button { Text = "Сынақ чек", Left = 150, Top = 100, Width = 120, Height = 34 };
-                var win = new Button { Text = "Windows...", Left = 280, Top = 100, Width = 120, Height = 34 };
-                test.Click += async (s, e) => { Save(cb); await TestPrint(); };
+                // Кухня чегі (админ ▸ Чек ▸ «Кухня чегі» қосулы болса): бөлек принтер, болмаса клиент чегінің принтері
+                var kc = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Left = 20, Top = 120, Width = 380 };
+                kc.Items.Add(Same);
+                foreach (string p in PrinterSettings.InstalledPrinters) kc.Items.Add(p);
+                string kcNow = "";
+                try { if (File.Exists(KitchenFile)) kcNow = File.ReadAllText(KitchenFile).Trim(); } catch { }
+                if (kcNow != "" && kc.Items.Contains(kcNow)) kc.SelectedItem = kcNow; else kc.SelectedIndex = 0;
+                var ok = new Button { Text = "Сақтау", Left = 20, Top = 180, Width = 120, Height = 34, DialogResult = DialogResult.OK };
+                var test = new Button { Text = "Сынақ чек", Left = 150, Top = 180, Width = 120, Height = 34 };
+                var win = new Button { Text = "Windows...", Left = 280, Top = 180, Width = 120, Height = 34 };
+                test.Click += async (s, e) => { Save(cb, kc); await TestPrint(false); if (kc.SelectedIndex > 0) await TestPrint(true); };
                 win.Click += (s, e) => { try { System.Diagnostics.Process.Start("control", "printers"); } catch { } };
-                f.Controls.Add(new Label { Text = "Чек қай принтерге шықсын (печать басқанда бірден шығады):", Left = 20, Top = 15, AutoSize = true });
-                f.Controls.AddRange(new Control[] { cb, ok, test, win });
+                f.Controls.Add(new Label { Text = "Клиент чегі қай принтерге шықсын:", Left = 20, Top = 12, AutoSize = true });
+                f.Controls.Add(new Label { Text = "Кухня чегі қай принтерге шықсын:", Left = 20, Top = 92, AutoSize = true });
+                f.Controls.AddRange(new Control[] { cb, kc, ok, test, win });
                 f.AcceptButton = ok;
-                if (f.ShowDialog(this) == DialogResult.OK) Save(cb);
+                if (f.ShowDialog(this) == DialogResult.OK) Save(cb, kc);
             }
             _ = Refresh2();
         }
 
-        static void Save(ComboBox cb)
+        static void Save(ComboBox cb, ComboBox kc)
         {
-            try { Directory.CreateDirectory(Paths.Data); File.WriteAllText(PrinterFile, cb.SelectedItem as string ?? ""); } catch { }
+            try
+            {
+                Directory.CreateDirectory(Paths.Data);
+                File.WriteAllText(PrinterFile, cb.SelectedItem as string ?? "");
+                File.WriteAllText(KitchenFile, kc.SelectedIndex > 0 ? (kc.SelectedItem as string ?? "") : ""); // бос = клиент чегінің принтері
+            }
+            catch { }
         }
 
-        async Task TestPrint()
+        async Task TestPrint(bool kitchen)
         {
             var f = new Form { ShowInTaskbar = false, StartPosition = FormStartPosition.Manual, Location = new Point(-3000, -3000), Size = new Size(400, 400) };
             var wv = new WebView2 { Dock = DockStyle.Fill }; f.Controls.Add(wv); f.Show(this);
@@ -292,9 +316,9 @@ namespace BerikPOS
                 await wv.EnsureCoreWebView2Async(env);
                 var tcs = new TaskCompletionSource<bool>();
                 wv.CoreWebView2.NavigationCompleted += (s, e) => tcs.TrySetResult(true);
-                wv.CoreWebView2.NavigateToString("<html><body style='font-family:sans-serif;width:70mm;margin:0'><h3 style='text-align:center'>Berik POS</h3><p style='text-align:center'>Сынақ чек<br>" + DateTime.Now.ToString("dd.MM.yyyy HH:mm") + "</p><p style='text-align:center'>Принтер: " + System.Net.WebUtility.HtmlEncode(ChosenPrinter()) + "</p></body></html>");
+                wv.CoreWebView2.NavigateToString("<html><body style='font-family:sans-serif;width:70mm;margin:0'><h3 style='text-align:center'>Berik POS</h3><p style='text-align:center'>" + (kitchen ? "Сынақ чек: КУХНЯ" : "Сынақ чек") + "<br>" + DateTime.Now.ToString("dd.MM.yyyy HH:mm") + "</p><p style='text-align:center'>Принтер: " + System.Net.WebUtility.HtmlEncode(kitchen ? KitchenPrinter() : ChosenPrinter()) + "</p></body></html>");
                 await tcs.Task;
-                await PrintSilent(wv.CoreWebView2);
+                await PrintSilent(wv.CoreWebView2, kitchen);
             }
             finally { await Task.Delay(500); f.Close(); }
         }
