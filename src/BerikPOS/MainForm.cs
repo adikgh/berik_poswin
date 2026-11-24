@@ -22,7 +22,10 @@ namespace BerikPOS
         readonly Label lblNet = new Label { AutoSize = false, Width = 120, Dock = DockStyle.Left, TextAlign = ContentAlignment.MiddleLeft, Padding = new Padding(10, 0, 0, 0), Font = new Font("Segoe UI", 10f, FontStyle.Bold) };
         readonly Label lblInfo = new Label { AutoSize = false, Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft, Font = new Font("Segoe UI", 9.5f), ForeColor = Color.FromArgb(70, 70, 70) };
         readonly Timer timer = new Timer { Interval = 60000 };
-        bool syncing, closing;
+        // Серверден жаңа заказдар (QR/сайт заказдары, курьер статустары) 20 секунд сайын тартылады,
+        // кассадағы «Сайттан жаңа тапсырыс» хабарламасы (notify.js) жергілікті базадан көреді
+        readonly Timer news = new Timer { Interval = 20000 };
+        bool syncing, closing, netUp;
 
         public MainForm()
         {
@@ -43,6 +46,7 @@ namespace BerikPOS
             Controls.Add(splash);
 
             timer.Tick += async (s, e) => await Sync("auto", false);
+            news.Tick += async (s, e) => await News();
             NetworkChange.NetworkAvailabilityChanged += (s, e) => { if (e.IsAvailable) BeginInvoke(new Action(async () => { await Task.Delay(5000); await Sync("auto", false); })); };
             Shown += async (s, e) => await Boot();
             FormClosing += OnClosing;
@@ -74,7 +78,7 @@ namespace BerikPOS
                 cw.Navigate($"http://127.0.0.1:{engine.SitePort}/");
                 splash.Visible = false; web.Visible = true; bar.Visible = true;
                 await Refresh2();
-                timer.Start();
+                timer.Start(); news.Start();
                 await Sync("auto", false);
                 Updater.CheckLater(this, () => Sync("push", false));
             }
@@ -214,6 +218,15 @@ namespace BerikPOS
             finally { syncing = false; UseWaitCursor = false; await Refresh2(); }
         }
 
+        async Task News()
+        {
+            if (agent == null || syncing || closing || !netUp) return;
+            syncing = true;
+            try { await Task.Run(() => agent.Call("state", null, 60000)); }
+            catch (Exception ex) { Log.W("news: " + ex.Message); }
+            finally { syncing = false; }
+        }
+
         public static string Human(string e)
         {
             switch (e)
@@ -232,6 +245,7 @@ namespace BerikPOS
 
         void SetNet(bool online)
         {
+            netUp = online;
             lblNet.Text = online ? "● Онлайн" : "● Офлайн";
             lblNet.ForeColor = online ? Color.FromArgb(22, 150, 70) : Color.FromArgb(200, 60, 40);
         }
@@ -258,13 +272,13 @@ namespace BerikPOS
             if (pending > 0) q += "Жүктелмеген заказ: " + pending + ". Олар жаңа серверге жүктеледі. Ескі серверге керек болса, алдымен «Серверге жүктеу» басыңыз.\n\n";
             q += "Серверді ауыстырасыз ба? Меню жаңа серверден қайта жүктеледі, жергілікті заказдар өшпейді.";
             if (MessageBox.Show(this, q, "Серверді ауыстыру", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
-            timer.Stop();
+            timer.Stop(); news.Stop();
             try
             {
                 using (var f = new SetupForm(agent, cur))
                     if (f.ShowDialog(this) == DialogResult.OK) web.CoreWebView2?.Reload();
             }
-            finally { timer.Start(); await Refresh2(); }
+            finally { timer.Start(); news.Start(); await Refresh2(); }
         }
 
         void OpenPrinters()
@@ -328,7 +342,7 @@ namespace BerikPOS
             if (closing) return;
             closing = true;
             e.Cancel = true;
-            timer.Stop();
+            timer.Stop(); news.Stop();
             Hide();
             // Жабар алдында интернет болса, соңғы жазбаларды жүктеп көреміз (ең көбі 20 секунд)
             if (agent != null) { var t = Task.Run(() => agent.Call("auto", null, 20000)); await Task.WhenAny(t, Task.Delay(20000)); }

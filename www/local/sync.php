@@ -1,9 +1,10 @@
 <?php
-	// Жергілікті синхрон: ?a=status | setup | menu | push | auto
+	// Жергілікті синхрон: ?a=status | setup | menu | push | state | auto
 	//  setup — бірінші кіру (сервер, компанияның 4 санды коды, точка) + бүкіл деректі тарту
 	//  menu  — менюді (анықтамалықтарды) серверден қайта тарту
 	//  push  — офлайн жазбаларды серверге жүктеу (батырма)
-	//  auto  — байланыс сапасын тексеріп, жақсы болса push (программа өзі шақырады)
+	//  state — серверден осы точканың соңғы заказдары мен сменаларын тарту (онлайн → офлайн ауысқанда жалғасу үшін)
+	//  auto  — байланыс сапасын тексеріп, жақсы болса push + state (программа өзі шақырады)
 	require __DIR__.'/lib.php';
 
 	$a = @$_GET['a'] ?: 'status';
@@ -11,13 +12,15 @@
 
 	if ($a == 'status') {
 		$s = settings();
-		$pending = 0;
+		$pending = 0; $drafts = 0;
 		try {
 			ensure_local_cols();
 			$pending = (int)@row("SELECT count(*) c FROM retail_orders WHERE paid = 1 AND (synced_at IS NULL OR sync_hash IS NULL)")['c'];
+			// Жергілікті кассада басталған (әлі рәсімделмеген) себет: бар болса, программа онлайн режимге өзі ауыспайды
+			$drafts = (int)@row("SELECT count(*) c FROM retail_orders o WHERE o.paid = 0 AND EXISTS (SELECT 1 FROM retail_orders_products p WHERE p.order_id = o.id)")['c'];
 		} catch (Throwable $e) {}
 		out(['ok' => true, 'ver' => APP_VER, 'linked' => !empty($s['token']), 'server' => @$s['server'], 'company_id' => @$s['company_id'], 'branch_id' => @$s['branch_id'],
-			'last_push' => @$s['last_push'], 'last_pull' => @$s['last_pull'], 'pending' => $pending]);
+			'last_push' => @$s['last_push'], 'last_pull' => @$s['last_pull'], 'last_state' => @$s['last_state'], 'pending' => $pending, 'drafts' => $drafts]);
 	}
 
 	if ($a == 'setup') {
@@ -39,6 +42,7 @@
 
 	if ($a == 'menu') { $lock = lock(); $p = push(); $r = ['push' => $p] + pull(); if (!is_file(FA_DIR.'/css/all.min.css')) $r['assets'] = fetch_assets(); out($r); }
 	if ($a == 'push') { $lock = lock(); out(push()); }
+	if ($a == 'state') { $lock = lock(); $p = push(); out(['push' => $p] + state()); }
 	if ($a == 'auto') {
 		$s = settings();
 		if (empty($s['token'])) out(['ok' => false, 'error' => 'not_linked']);
@@ -46,6 +50,8 @@
 		if (!$n['good']) out(['ok' => false, 'error' => 'weak_net', 'net' => $n]);
 		$lock = lock();
 		$r = ['net' => $n] + push();
+		// Серверде жасалған/өзгерген заказдар (онлайн режим, QR, курьер статустары) кассаға да келеді
+		try { $r['state'] = state(); } catch (Throwable $e) { $r['state'] = ['ok' => false, 'error' => $e->getMessage()]; }
 		// Программа жаңарғаннан кейін бір рет менюді (құрылым + анықтамалықтар) қайта тартамыз:
 		// сайттағы жаңа бағандар мен кестелер (мысалы, бірнеше касса, акциялар, чек баптауы, аудармалар) кассаға жетеді
 		if (@$s['pull_ver'] !== APP_VER) { try { $r['pull'] = pull(); } catch (Throwable $e) { $r['pull'] = ['ok' => false, 'error' => $e->getMessage()]; } }
@@ -105,16 +111,8 @@
 		q("START TRANSACTION");
 		foreach ($j['data'] as $t => $list) {
 			if (in_array($t, OWN_TABLES) || !preg_match('/^[a-z0-9_]+$/i', $t)) continue;
+			if ($t == 'company_client') continue; // клиенттер тартылмайды (ескі сервер жіберсе де)
 			$keep = [];
-			// кассада жасалған, әлі серверге жетпеген клиенттерді сақтаймыз
-			if ($t == 'company_client' && in_array($t, $have)) {
-				// серверге жеткен клиенттер (телефоны сәйкес) серверлік id-ге ауысады
-				$srv = []; foreach ($list as $c) if (!empty($c['phone'])) $srv[$c['phone']] = (int)$c['id'];
-				foreach (rows("SELECT * FROM company_client WHERE id >= 900000000") as $c) {
-					if (isset($srv[$c['phone']])) q("UPDATE retail_orders SET client_id = '".$srv[$c['phone']]."' WHERE client_id = '".(int)$c['id']."'");
-					else $keep[] = $c;
-				}
-			}
 			q("DELETE FROM `$t`");
 			$lc = cols($t);
 			foreach (array_merge($list, $keep) as $row) {
@@ -123,8 +121,9 @@
 				if ($f) q("INSERT INTO `$t` (".implode(',', $f).") VALUES (".implode(',', $v).")");
 			}
 		}
-		// Офлайнда жеткізу жоқ: тек Кафе, Собой, Сервис
-		if (isset(cols('company')['delivery'])) q("UPDATE company SET delivery = 0");
+		// Клиенттердің деректері кассада сақталмайды (user 2026-11-24): бұрын тартылғандарын өшіреміз,
+		// кассада жаңадан жазылғандары (id >= 900000000) серверге жүктелу үшін қалады
+		if (in_array('company_client', $have)) q("DELETE FROM company_client WHERE id < 900000000");
 		q("COMMIT");
 		// Кассада қосылған клиенттер серверден келгендермен қақтығыспасын
 		if (in_array('company_client', tables())) q("ALTER TABLE company_client AUTO_INCREMENT = 900000000");
@@ -147,33 +146,17 @@
 		$since = date('Y-m-d H:i:s', strtotime('-3 day'));
 		$orders = rows("SELECT * FROM retail_orders WHERE paid = 1 AND (synced_at IS NULL OR ins_dt >= '$since' OR upd_dt >= '$since') ORDER BY id");
 		$send = []; $hash = [];
-		$has_log = in_array('retail_orders_log', tables());
 		foreach ($orders as $o) {
-			$oid = (int)$o['id'];
-			$prod = rows("SELECT * FROM retail_orders_products WHERE order_id = '$oid' ORDER BY id");
-			foreach ($prod as &$p) unset($p['id'], $p['order_id']); unset($p);
-			$log = [];
-			if ($has_log) foreach (rows("SELECT * FROM retail_orders_log WHERE order_id = '$oid' ORDER BY id") as $l) {
-				$l['uuid'] = $l['offline_uuid']; unset($l['id'], $l['order_id'], $l['offline_uuid']); $log[] = $l;
-			}
-			$client = null;
-			if ((int)@$o['client_id']) {
-				$client = row("SELECT * FROM company_client WHERE id = '".(int)$o['client_id']."'");
-				if ($client) unset($client['id'], $client['company_id'], $client['user_id']);
-			}
-			$ord = $o; $u = $o['offline_uuid'];
-			unset($ord['id'], $ord['offline_uuid'], $ord['server_id'], $ord['synced_at'], $ord['sync_hash'], $ord['client_id']);
-			$item = ['uuid' => $u, 'order' => $ord, 'products' => $prod, 'log' => $log, 'client' => $client];
+			$item = order_item($o); $u = $item['uuid'];
 			$h = md5(json_encode($item));
 			if ($h === $o['sync_hash'] && $o['synced_at']) continue;
-			$send[] = $item; $hash[$u] = [$oid, $h];
+			$send[] = $item; $hash[$u] = [(int)$o['id'], $h];
 		}
 
 		$shifts = []; $shash = [];
 		if (in_array('retail_shifts', tables())) foreach (rows("SELECT * FROM retail_shifts WHERE synced_at IS NULL OR sync_hash IS NULL OR upd_dt >= '$since'") as $sh) {
-			$u = $sh['offline_uuid']; $sid = (int)$sh['id'];
-			unset($sh['id'], $sh['offline_uuid'], $sh['server_id'], $sh['synced_at'], $sh['sync_hash']);
-			$item = ['uuid' => $u, 'shift' => $sh]; $h = md5(json_encode($item));
+			$sid = (int)$sh['id'];
+			$item = shift_item($sh); $u = $item['uuid']; $h = md5(json_encode($item));
 			$old = row("SELECT sync_hash, synced_at FROM retail_shifts WHERE id = '$sid'");
 			if ($old['synced_at'] && $old['sync_hash'] === $h) continue;
 			$shifts[] = $item; $shash[$u] = [$sid, $h];
@@ -198,4 +181,139 @@
 		}
 		$s = settings(); if (!$errors) $s['last_push'] = date('Y-m-d H:i:s'); save_settings($s);
 		return ['ok' => !$errors, 'sent' => $done, 'shifts' => $sdone, 'left' => count($send) - $done, 'errors' => $errors];
+	}
+
+
+	// Серверге жіберілетін заказ (хэш осыдан есептеледі, state() те дәл осылай есептейді)
+	function order_item($o) {
+		static $has_log = null;
+		if ($has_log === null) $has_log = in_array('retail_orders_log', tables());
+		$oid = (int)$o['id'];
+		$prod = rows("SELECT * FROM retail_orders_products WHERE order_id = '$oid' ORDER BY id");
+		foreach ($prod as &$p) unset($p['id'], $p['order_id']); unset($p);
+		$log = [];
+		if ($has_log) foreach (rows("SELECT * FROM retail_orders_log WHERE order_id = '$oid' ORDER BY id") as $l) {
+			$l['uuid'] = $l['offline_uuid']; unset($l['id'], $l['order_id'], $l['offline_uuid']); $log[] = $l;
+		}
+		// Клиент: тек кассада жаңадан жазылғаны (серверден клиент деректері келмейді). Табылмаса client_id
+		// жіберілмейді, сондықтан серверде бұрынғы клиенті өзгермейді
+		$client = null;
+		if ((int)@$o['client_id']) {
+			$client = row("SELECT * FROM company_client WHERE id = '".(int)$o['client_id']."'");
+			if ($client) unset($client['id'], $client['company_id'], $client['user_id']);
+		}
+		$ord = $o;
+		unset($ord['id'], $ord['offline_uuid'], $ord['server_id'], $ord['synced_at'], $ord['sync_hash'], $ord['client_id']);
+		return ['uuid' => $o['offline_uuid'], 'order' => $ord, 'products' => $prod, 'log' => $log, 'client' => $client];
+	}
+
+	function shift_item($sh) {
+		$u = $sh['offline_uuid'];
+		unset($sh['id'], $sh['offline_uuid'], $sh['server_id'], $sh['synced_at'], $sh['sync_hash']);
+		return ['uuid' => $u, 'shift' => $sh];
+	}
+
+	// Жолды жергілікті кестеге жазу: тек бар бағандар; $id болса жаңарту
+	function put_row($t, $data, $id = null) {
+		static $cc = [];
+		if (!isset($cc[$t])) $cc[$t] = cols($t);
+		$set = [];
+		foreach ($data as $k => $v) if ($k != 'id' && isset($cc[$t][$k])) $set[] = "`$k` = ".sqlv($v);
+		if (!$set) return $id;
+		if ($id) { q("UPDATE `$t` SET ".implode(', ', $set)." WHERE id = '".(int)$id."'"); return (int)$id; }
+		q("INSERT INTO `$t` SET ".implode(', ', $set));
+		return (int)mysqli_insert_id(db::$connect);
+	}
+
+
+	// ---------- Серверден соңғы заказдар мен сменалар ----------
+	// Серверде (сайттағы кассада) жасалған заказдар, QR/сайт заказдары, курьер статустары, бұрынғы заказдар (тарих)
+	// кассаға көшіріледі. Кассада өзгеріп, әлі жүктелмеген жазбаға тимейміз (алдымен push жүреді).
+	function state() {
+		$s = settings();
+		// Тарих (бұрынғы заказдар) бітпесе, before_id жібереміз: бір шақыруда 300-ден, ең көбі 5 рет
+		$hist_on = empty($s['hist_done']);
+		$req = ['hash' => @$s['state_hash']];
+		if ($hist_on) $req['before_id'] = (int)@$s['hist_before'];
+		$r = api('state.php', $req, 90);
+		if (!$r['json']) return ['ok' => false, 'error' => 'no_connection', 'detail' => $r['err']];
+		if (!@$r['json']['ok']) return ['ok' => false, 'error' => @$r['json']['error'] ?: 'http_'.$r['code']];
+		$j = $r['json'];
+		ensure_local_cols();
+		$have = tables();
+		if (!in_array('retail_orders', $have)) return ['ok' => false, 'error' => 'no_local_tables'];
+		$now = date('Y-m-d H:i:s');
+		$res = ['ok' => true, 'orders' => 0, 'shifts' => 0, 'skipped' => 0, 'history' => 0];
+		$hist = function ($j) use (&$res) {
+			if (!array_key_exists('hist_next', $j)) return false;
+			$x = import_orders((array)@$j['history']); $res['history'] += $x[0];
+			$s = settings();
+			if ((int)$j['hist_next'] > 0) $s['hist_before'] = (int)$j['hist_next']; else { $s['hist_done'] = true; unset($s['hist_before']); }
+			save_settings($s);
+			return (int)$j['hist_next'] > 0;
+		};
+		if (!empty($j['same'])) {
+			$more = $hist($j);
+		} else {
+			$x = import_orders((array)@$j['orders']); $res['orders'] = $x[0]; $res['skipped'] = $x[1];
+			$more = $hist($j);
+		}
+		for ($i = 0; $more && $i < 4; $i++) {
+			$s = settings();
+			$r2 = api('state.php', ['hash' => $j['hash'] ?? @$s['state_hash'], 'before_id' => (int)@$s['hist_before']], 90);
+			if (!$r2['json'] || !@$r2['json']['ok']) break;
+			$more = $hist($r2['json']);
+		}
+		if (!empty($j['same'])) { $s = settings(); $s['last_state'] = $now; save_settings($s); return $res + ['same' => true]; }
+		$have_sh = in_array('retail_shifts', $have);
+		q("START TRANSACTION");
+		$sn = 0;
+		if ($have_sh) foreach ((array)@$j['shifts'] as $it) {
+			$u = (string)@$it['uuid'];
+			if (!preg_match('/^[a-f0-9-]{36}$/', $u) || !is_array(@$it['shift'])) continue;
+			$loc = row("SELECT * FROM retail_shifts WHERE offline_uuid = '".esc($u)."' LIMIT 1");
+			if ($loc && $loc['synced_at'] && md5(json_encode(shift_item($loc))) !== $loc['sync_hash']) continue;
+			$sh = $it['shift']; $sh['offline_uuid'] = $u;
+			$id = put_row('retail_shifts', $sh, $loc ? (int)$loc['id'] : null);
+			if (!$id) continue;
+			$h = md5(json_encode(shift_item(row("SELECT * FROM retail_shifts WHERE id = '$id'"))));
+			q("UPDATE retail_shifts SET server_id = ".sqlv(@$sh['server_id']).", synced_at = '$now', sync_hash = '$h' WHERE id = '$id'");
+			$sn++;
+		}
+		q("COMMIT");
+		$s = settings(); $s['state_hash'] = @$j['hash']; $s['last_state'] = $now; save_settings($s);
+		$res['shifts'] = $sn;
+		return $res;
+	}
+
+	// Серверден келген заказдарды жергілікті базаға жазу. Қайтарады: [жазылды, өткізілді]
+	// Кассада өзгеріп, әлі жүктелмеген заказға тимейміз (push алдымен жүреді)
+	function import_orders($list) {
+		static $has_log = null;
+		if ($has_log === null) $has_log = in_array('retail_orders_log', tables());
+		$now = date('Y-m-d H:i:s');
+		$n = 0; $skip = 0;
+		q("START TRANSACTION");
+		foreach ($list as $it) {
+			$u = (string)@$it['uuid'];
+			if (!preg_match('/^[a-f0-9-]{36}$/', $u) || !is_array(@$it['order'])) continue;
+			$loc = row("SELECT * FROM retail_orders WHERE offline_uuid = '".esc($u)."' LIMIT 1");
+			if ($loc && $loc['synced_at'] && md5(json_encode(order_item($loc))) !== $loc['sync_hash']) { $skip++; continue; }
+			$ord = $it['order']; $ord['offline_uuid'] = $u;
+			$id = put_row('retail_orders', $ord, $loc ? (int)$loc['id'] : null);
+			if (!$id) continue;
+			q("DELETE FROM retail_orders_products WHERE order_id = '$id'");
+			foreach ((array)@$it['products'] as $p) if (is_array($p)) { $p['order_id'] = $id; put_row('retail_orders_products', $p); }
+			if ($has_log) foreach ((array)@$it['log'] as $l) {
+				$lu = (string)@$l['uuid'];
+				if (!preg_match('/^[a-f0-9-]{36}$/', $lu) || row("SELECT id FROM retail_orders_log WHERE offline_uuid = '".esc($lu)."'")) continue;
+				unset($l['uuid']); $l['offline_uuid'] = $lu; $l['order_id'] = $id;
+				put_row('retail_orders_log', $l);
+			}
+			$h = md5(json_encode(order_item(row("SELECT * FROM retail_orders WHERE id = '$id'"))));
+			q("UPDATE retail_orders SET server_id = ".sqlv(@$ord['server_id']).", synced_at = '$now', sync_hash = '$h' WHERE id = '$id'");
+			$n++;
+		}
+		q("COMMIT");
+		return [$n, $skip];
 	}
