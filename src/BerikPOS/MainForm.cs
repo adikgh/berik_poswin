@@ -381,10 +381,60 @@ namespace BerikPOS
             try
             {
                 var cw = web.CoreWebView2; if (cw == null) return;
-                _ = cw.ExecuteScriptAsync("window.__bpw&&window.__bpw({on:" + (netUp ? "true" : "false") + ",pending:" + barPending + ",last:" + J(barLast) + ",busy:" + J(barBusy) + "})");
+                _ = cw.ExecuteScriptAsync("window.__bpw&&window.__bpw({on:" + (netUp ? "true" : "false") + ",pending:" + barPending + ",last:" + J(barLast) + ",busy:" + J(barBusy) + ",ver:" + J(Program.Version) + "})");
             }
             catch { }
         }
+        // Диагностика: басқа компьютерде чек шықпаса — осы терезенің суретін жібереді (user 2026-11-25)
+        async Task ShowDiag()
+        {
+            var sb = new System.Text.StringBuilder();
+            sb.AppendLine("Berik POS нұсқасы: " + Program.Version);
+            sb.AppendLine("Windows: " + Environment.OSVersion.VersionString + (Environment.Is64BitOperatingSystem ? " 64-bit" : " 32-bit"));
+            try { sb.AppendLine("WebView2: " + CoreWebView2Environment.GetAvailableBrowserVersionString()); } catch { }
+            sb.AppendLine("Интернет: " + (netUp ? "бар" : "жоқ"));
+            sb.AppendLine();
+            string def = ""; try { def = new PrinterSettings().PrinterName; } catch { }
+            sb.AppendLine("Клиент чегі принтері: " + (File.Exists(PrinterFile) ? File.ReadAllText(PrinterFile).Trim() : "(таңдалмаған)") + "  → " + ChosenPrinter());
+            sb.AppendLine("Кухня чегі принтері: " + (File.Exists(KitchenFile) && File.ReadAllText(KitchenFile).Trim() != "" ? File.ReadAllText(KitchenFile).Trim() : "(клиент чегімен бірдей)"));
+            sb.AppendLine("Windows әдепкі принтері: " + def);
+            try { if (File.Exists(OptsFile)) sb.AppendLine("Баптаулар: " + string.Join(", ", File.ReadAllLines(OptsFile))); } catch { }
+            sb.Append("Компьютердегі принтерлер: ");
+            try { var l = new List<string>(); foreach (string p in PrinterSettings.InstalledPrinters) l.Add(p); sb.AppendLine(string.Join("; ", l)); } catch { sb.AppendLine("?"); }
+            // Касса бетіндегі «Сақтау және чек шығару» батырмасы: автомат чек қосулы ма (data-print), қай чектер (data-kinds)
+            try
+            {
+                string r = await web.CoreWebView2.ExecuteScriptAsync("(function(){var b=document.querySelector('.cashbox_pay2[data-print]');return b?('print='+b.getAttribute('data-print')+' kinds='+b.getAttribute('data-kinds')):'(касса беті ашық емес)'})()");
+                sb.AppendLine("Автомат чек (касса беті): " + r.Trim('"'));
+            }
+            catch { }
+            sb.AppendLine();
+            sb.AppendLine("Соңғы басу жазбалары:");
+            try
+            {
+                var lines = new List<string>();
+                foreach (var f in Directory.GetFiles(Paths.Logs, "app-*.log")) lines.AddRange(File.ReadAllLines(f));
+                var pr = lines.FindAll(x => x.Contains(" print") || x.Contains("newwindow") || x.Contains("update"));
+                foreach (var x in pr.GetRange(Math.Max(0, pr.Count - 25), Math.Min(25, pr.Count))) sb.AppendLine(x);
+                if (pr.Count == 0) sb.AppendLine("(жоқ: программа әлі чек басуға тырыспаған)");
+            }
+            catch (Exception ex) { sb.AppendLine("лог оқылмады: " + ex.Message); }
+
+            using (var f = new Form { Text = "Диагностика", StartPosition = FormStartPosition.CenterParent, ClientSize = new Size(820, 560), Font = new Font("Segoe UI", 9.5f), MinimizeBox = false })
+            {
+                var tb = new TextBox { Multiline = true, ReadOnly = true, ScrollBars = ScrollBars.Both, WordWrap = false, Dock = DockStyle.Fill, Font = new Font("Consolas", 9.5f), Text = sb.ToString() };
+                var pn = new Panel { Dock = DockStyle.Bottom, Height = 48 };
+                var cp = new Button { Text = "Көшіру", Left = 12, Top = 8, Width = 140, Height = 32 };
+                var lg = new Button { Text = "Лог папкасы", Left = 162, Top = 8, Width = 140, Height = 32 };
+                var cl = new Button { Text = "Жабу", Left = 312, Top = 8, Width = 140, Height = 32, DialogResult = DialogResult.Cancel };
+                cp.Click += (s, e) => { try { Clipboard.SetText(tb.Text); cp.Text = "Көшірілді ✓"; } catch { } };
+                lg.Click += (s, e) => { try { System.Diagnostics.Process.Start("explorer.exe", Paths.Logs); } catch { } };
+                pn.Controls.AddRange(new Control[] { cp, lg, cl });
+                f.Controls.Add(tb); f.Controls.Add(pn); f.CancelButton = cl;
+                f.ShowDialog(this);
+            }
+        }
+
         async void OnBarCmd(object sender, CoreWebView2WebMessageReceivedEventArgs e)
         {
             string m; try { m = e.TryGetWebMessageAsString(); } catch { return; }
@@ -394,6 +444,7 @@ namespace BerikPOS
                 case "bpw:push": await Sync("push", true); break;
                 case "bpw:printer": OpenPrinters(); break;
                 case "bpw:server": await ChangeServer(); break;
+                case "bpw:diag": await ShowDiag(); break;
             }
         }
         // Онлайн/Офлайн белгісі «Касса-…» блогында (аты мен иконкасының жанында); басқанда толығы ашылады
@@ -419,7 +470,7 @@ function draw(){
  el.querySelector('.bpw_ic').innerHTML=st.on?ON:OFF;
  var n=el.querySelector('.bpw_n');n.style.display=st.pending>0?'':'none';n.textContent=st.pending;
  el.querySelector('.bpw_s').textContent=st.busy||(st.on?'● Онлайн':'● Офлайн');
- el.querySelector('.bpw_h').innerHTML='Жүктелмеген заказ: <b>'+st.pending+'</b><br>Соңғы жүктеу: '+String(st.last).replace(/</g,'&lt;');
+ el.querySelector('.bpw_h').innerHTML='Жүктелмеген заказ: <b>'+st.pending+'</b><br>Соңғы жүктеу: '+String(st.last).replace(/</g,'&lt;')+'<br>Нұсқа: '+String(st.ver||'');
 }
 function mount(){
  if(el&&document.body.contains(el))return;
@@ -430,7 +481,8 @@ function mount(){
  +'<div class=""bpw_i"" data-c=""bpw:push"">Серверге жүктеу</div>'
  +'<div class=""bpw_i"" data-c=""bpw:menu"">Менюді жаңарту</div>'
  +'<div class=""bpw_i"" data-c=""bpw:printer"">Принтер</div>'
- +'<div class=""bpw_i"" data-c=""bpw:server"">Сервер</div></div>';
+ +'<div class=""bpw_i"" data-c=""bpw:server"">Сервер</div>'
+ +'<div class=""bpw_i"" data-c=""bpw:diag"">Диагностика</div></div>';
  var host=document.querySelector('.ub1_lx');
  if(host){host.insertBefore(el,host.firstChild);}else{el.__fix=true;document.body.appendChild(el);}
  el.addEventListener('click',function(e){
