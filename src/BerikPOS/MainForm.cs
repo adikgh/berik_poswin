@@ -134,7 +134,7 @@ namespace BerikPOS
             int v; if (!int.TryParse(o.TryGetValue(k, out var s) ? s : "", out v)) v = def;
             return Math.Max(min, Math.Min(max, v));
         }
-        static void ApplyOpts(CoreWebView2PrintSettings ps)
+        static void ApplyOpts(CoreWebView2PrintSettings ps, double contentIn = 0)
         {
             var o = Opts();
             ps.ShouldPrintBackgrounds = true;
@@ -145,11 +145,16 @@ namespace BerikPOS
             int sc = OptInt(o, "scale", 100, 30, 200);
             if (sc != 100) ps.ScaleFactor = sc / 100.0;
             if (o["orient"] == "landscape") ps.Orientation = CoreWebView2PrintOrientation.Landscape;
+            // Чек лентасы: беттің биіктігі = чектің өз биіктігі, сонда чек бір тұтас кесінді болып шығады
+            // (драйвердің қысқа қағаз өлшемі, мысалы 80×80, чекті бірнеше бөлікке бөліп, арасына бос орын қалдыратын, user 2026-11-25).
+            int rw0 = OptInt(o, "rw", 0, 0, 210);
+            double rollW = (o["paper"] == "58" || (o["paper"] == "printer" && rw0 > 0 && rw0 <= 58) ? 58 : 80) / 25.4;
+            double h = contentIn > 0 ? Math.Max(2.0, Math.Min(120.0, contentIn * sc / 100.0 + 2 * m + 0.4)) : 297 / 25.4;
             switch (o["paper"])
             {
-                case "58": ps.PageWidth = 58 / 25.4; ps.PageHeight = 297 / 25.4; break;
-                case "80": ps.PageWidth = 80 / 25.4; ps.PageHeight = 297 / 25.4; break;
                 case "a4": ps.PageWidth = 210 / 25.4; ps.PageHeight = 297 / 25.4; break;
+                case "fixed": break; // принтер драйверінің өз қағазы (бұрынғыдай)
+                default: ps.PageWidth = rollW; ps.PageHeight = h; break; // printer, 58, 80
             }
             try
             {
@@ -267,6 +272,25 @@ namespace BerikPOS
             finally { await Task.Delay(done ? 800 : 0); if (!f.IsDisposed) f.Close(); }
         }
 
+        // Чектің басылғандағы биіктігі (дюйм): print стилімен өлшейміз
+        static async Task<double> ContentHeightIn(CoreWebView2 cw)
+        {
+            try
+            {
+                try { await cw.CallDevToolsProtocolMethodAsync("Emulation.setEmulatedMedia", "{\"media\":\"print\"}"); } catch { }
+                string r = await cw.ExecuteScriptAsync("(function(){var d=document.documentElement,b=document.body;var h=Math.max(d.scrollHeight,d.offsetHeight,b?b.scrollHeight:0,b?b.offsetHeight:0,b?Math.ceil(b.getBoundingClientRect().bottom+window.scrollY):0);return h;})()");
+                try { await cw.CallDevToolsProtocolMethodAsync("Emulation.setEmulatedMedia", "{\"media\":\"\"}"); } catch { }
+                double px;
+                if (double.TryParse((r ?? "").Trim('"'), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out px) && px > 0)
+                {
+                    Log.W($"print height: {px}px");
+                    return px / 96.0;
+                }
+            }
+            catch (Exception ex) { Log.W("print height: " + ex.Message); }
+            return 0;
+        }
+
         async Task PrintSilent(CoreWebView2 cw, bool kitchen = false)
         {
             // Принтер әлі таңдалмаса — бірінші рет таңдатамыз
@@ -278,11 +302,11 @@ namespace BerikPOS
                 // Windows 10/11 (жаңа WebView2): нақты принтерге, диалогсыз
                 var ps = env.CreatePrintSettings();
                 if (!string.IsNullOrEmpty(printer)) ps.PrinterName = printer;
-                ApplyOpts(ps);
                 // Чек ені (мм): сайттың print.css-індегі body ені (80 мм чекте 70 мм) орнына — шеттегі бос орын азаяды
                 int rw = OptInt(Opts(), "rw", 0, 0, 210);
                 if (rw > 0)
                     try { await cw.ExecuteScriptAsync("(function(){var s=document.createElement('style');s.textContent='html,body{margin:0!important}body{width:" + rw + "mm!important;padding:0 1mm!important;box-sizing:border-box}';document.head?document.head.appendChild(s):document.documentElement.appendChild(s);})()"); } catch { }
+                ApplyOpts(ps, await ContentHeightIn(cw));
                 var st = await cw.PrintAsync(ps);
                 Log.W($"print: {printer} -> {st}");
                 if (st == CoreWebView2PrintStatus.Succeeded) return;
@@ -543,8 +567,8 @@ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',
                 if (kcNow != "" && kc.Items.Contains(kcNow)) kc.SelectedItem = kcNow; else kc.SelectedIndex = 0;
                 f.Controls.Add(kc); y += 52;
 
-                string[] paperK = { "printer", "58", "80", "a4" };
-                L("Қағаз өлшемі"); var paper = C("Принтердікі", "58 мм (чек)", "80 мм (чек)", "A4");
+                string[] paperK = { "printer", "58", "80", "a4", "fixed" };
+                L("Қағаз өлшемі"); var paper = C("Чек лентасы (авто, бір тұтас)", "58 мм лента", "80 мм лента", "A4", "Windows драйверінікі");
                 paper.SelectedIndex = Math.Max(0, Array.IndexOf(paperK, o["paper"]));
                 int[] marginK = { 0, 2, 5, 10 };
                 L("Чек ені, мм"); var rw = new NumericUpDown { Left = 200, Top = y, Width = 100, Minimum = 0, Maximum = 210, Value = OptInt(o, "rw", 0, 0, 210) }; f.Controls.Add(rw);
