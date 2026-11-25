@@ -255,9 +255,7 @@ namespace BerikPOS
             if (agent == null) return;
             var st = await Task.Run(() => agent.Call("status", null, 15000));
             if (string.IsNullOrEmpty(lblNet.Text)) SetNet(false);
-            string printer = ChosenPrinter();
-            if (File.Exists(KitchenFile) && KitchenPrinter() != printer) printer += "  ·  Кухня: " + KitchenPrinter();
-            lblInfo.Text = $"Жүктелмеген заказ: {st.Int("pending")}   ·   Соңғы жүктеу: {st.Str("last_push") ?? "—"}   ·   Принтер: {(string.IsNullOrEmpty(printer) ? "таңдалмаған" : printer)}   ·   v{Program.Version}";
+            lblInfo.Text = $"Жүктелмеген заказ: {st.Int("pending")}   ·   Соңғы жүктеу: {st.Str("last_push") ?? "—"}";
         }
 
         // Орнатқаннан кейін де серверді ауыстыруға болады (мысалы, локал сервер → интернеттегі сервер)
