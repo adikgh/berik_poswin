@@ -17,7 +17,7 @@ namespace BerikPOS
         Agent agent;
         CoreWebView2Environment env;
         readonly WebView2 web = new WebView2 { Dock = DockStyle.Fill, Visible = false };
-        readonly Label splash = new Label { Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleCenter, Font = new Font("Segoe UI", 14f), Text = "Berik POS іске қосылуда..." };
+        readonly UiSplash splash = new UiSplash { Dock = DockStyle.Fill, Text = "Іске қосылуда...", Version = Program.Version };
         readonly Panel bar = new Panel { Dock = DockStyle.Top, Height = 40, BackColor = Color.FromArgb(245, 246, 248), Visible = false };
         readonly Label lblNet = new Label { AutoSize = false, Width = 120, Dock = DockStyle.Left, TextAlign = ContentAlignment.MiddleLeft, Padding = new Padding(10, 0, 0, 0), Font = new Font("Segoe UI", 10f, FontStyle.Bold) };
         readonly Label lblInfo = new Label { AutoSize = false, Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft, Font = new Font("Segoe UI", 9.5f), ForeColor = Color.FromArgb(70, 70, 70) };
@@ -30,6 +30,7 @@ namespace BerikPOS
         public MainForm()
         {
             Text = "Berik POS";
+            BackColor = Ui.Bg;
             WindowState = FormWindowState.Maximized;
             MinimumSize = new Size(800, 600);
             try { Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath); } catch { }
@@ -89,7 +90,7 @@ namespace BerikPOS
             {
                 Log.W("boot: " + ex);
                 string hint = ex is WebView2RuntimeNotFoundException ? "\n\nWebView2 runtime табылмады. Программаны қайта орнатыңыз." : "";
-                MessageBox.Show(this, "Программа іске қосылмады:\n" + ex.Message + hint + "\n\nЛог: " + Paths.Logs, "Berik POS", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                Ui.Msg(this, "Программа іске қосылмады:\n" + ex.Message + hint + "\n\nЛог: " + Paths.Logs, "Қате", error: true);
                 Close();
             }
         }
@@ -314,9 +315,9 @@ namespace BerikPOS
                 Log.W($"print: {printer} -> {st}");
                 if (st == CoreWebView2PrintStatus.Succeeded) return;
                 if (st == CoreWebView2PrintStatus.PrinterUnavailable)
-                    MessageBox.Show(this, "Принтер табылмады: " + printer + "\n«Принтер» батырмасынан чек принтерін таңдаңыз.", "Berik POS", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    Ui.Msg(this, "Принтер табылмады: " + printer + "\nWi‑Fi белгішесі ▸ «Принтер» арқылы чек принтерін таңдаңыз.", "Чек басылмады", error: true);
                 else
-                    MessageBox.Show(this, "Чек басылмады (" + st + "). Принтер қосулы ма, қағазы бар ма тексеріңіз.", "Berik POS", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    Ui.Msg(this, "Принтер қосулы ма, қағазы бар ма тексеріңіз.\n(" + st + ")", "Чек басылмады", error: true);
             }
             catch (Exception ex)
             {
@@ -329,7 +330,7 @@ namespace BerikPOS
 
         async Task Sync(string action, bool manual)
         {
-            if (agent == null || syncing) { if (manual && syncing) MessageBox.Show(this, "Синхрон жүріп жатыр, біраз күтіңіз.", "Berik POS"); return; }
+            if (agent == null || syncing) { if (manual && syncing) Ui.Msg(this, "Синхрон жүріп жатыр, біраз күтіңіз."); return; }
             syncing = true;
             if (manual) { lblInfo.Text = action == "menu" ? "Меню жаңартылуда..." : "Серверге жүктелуде..."; barBusy = lblInfo.Text; PushBar(); UseWaitCursor = true; }
             try
@@ -343,13 +344,13 @@ namespace BerikPOS
                     {
                         SetNet(true);
                         string msg = action == "menu" ? "Меню жаңартылды." : $"Жүктелді: {r.Int("sent")} заказ, {r.Int("shifts")} смена.";
-                        MessageBox.Show(this, msg, "Berik POS", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                        Ui.Msg(this, msg, "Дайын");
                         if (action == "menu") web.CoreWebView2?.Reload();
                     }
                     else
                     {
                         if (err == "no_connection" || err == "agent") SetNet(false);
-                        MessageBox.Show(this, "Орындалмады: " + Human(err) + (r.Str("detail") != null ? "\n" + r.Str("detail") : ""), "Berik POS", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                        Ui.Msg(this, Human(err) + (r.Str("detail") != null ? "\n" + r.Str("detail") : ""), "Орындалмады", error: true);
                     }
                 }
             }
@@ -447,17 +448,21 @@ namespace BerikPOS
             }
             catch (Exception ex) { sb.AppendLine("лог оқылмады: " + ex.Message); }
 
-            using (var f = new Form { Text = "Диагностика", StartPosition = FormStartPosition.CenterParent, ClientSize = new Size(820, 560), Font = new Font("Segoe UI", 9.5f), MinimizeBox = false })
+            using (var f = new UiForm("Диагностика", 860))
             {
-                var tb = new TextBox { Multiline = true, ReadOnly = true, ScrollBars = ScrollBars.Both, WordWrap = false, Dock = DockStyle.Fill, Font = new Font("Consolas", 9.5f), Text = sb.ToString() };
-                var pn = new Panel { Dock = DockStyle.Bottom, Height = 48 };
-                var cp = new Button { Text = "Көшіру", Left = 12, Top = 8, Width = 140, Height = 32 };
-                var lg = new Button { Text = "Лог папкасы", Left = 162, Top = 8, Width = 140, Height = 32 };
-                var cl = new Button { Text = "Жабу", Left = 312, Top = 8, Width = 140, Height = 32, DialogResult = DialogResult.Cancel };
-                cp.Click += (s, e) => { try { Clipboard.SetText(tb.Text); cp.Text = "Көшірілді ✓"; } catch { } };
+                var card = new UiCard(null, f.Inner) { Height = 460 };
+                var tb = new TextBox { Multiline = true, ReadOnly = true, ScrollBars = ScrollBars.Vertical, WordWrap = true, BorderStyle = BorderStyle.None, BackColor = Ui.Card, ForeColor = Ui.Text,
+                    Font = new Font("Consolas", 9.5f), Text = sb.ToString().Replace("\n", "\r\n").Replace("\r\r\n", "\r\n"), Location = new Point(16, 14), Size = new Size(f.Inner - 32, 432) };
+                card.Controls.Add(tb);
+                f.AddBody(card, 4);
+                var cp = new UiButton("Көшіру", UiButton.Kind.Dark);
+                var lg = new UiButton("Лог папкасы", UiButton.Kind.Light);
+                var cl = new UiButton("Жабу", UiButton.Kind.Light) { DialogResult = DialogResult.Cancel };
+                cp.Click += (s, e) => { try { Clipboard.SetText(tb.Text); cp.Text = "Көшірілді ✓"; cp.Invalidate(); } catch { } };
                 lg.Click += (s, e) => { try { System.Diagnostics.Process.Start("explorer.exe", Paths.Logs); } catch { } };
-                pn.Controls.AddRange(new Control[] { cp, lg, cl });
-                f.Controls.Add(tb); f.Controls.Add(pn); f.CancelButton = cl;
+                f.AddFoot(cp, lg, cl); f.CancelButton = cl;
+                tb.TabStop = false; f.Shown += (s, e) => { tb.SelectionLength = 0; cl.Focus(); };
+                f.Finish();
                 f.ShowDialog(this);
             }
         }
@@ -529,14 +534,14 @@ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',
         async Task ChangeServer()
         {
             if (agent == null) return;
-            if (syncing) { MessageBox.Show(this, "Синхрон жүріп жатыр, біраз күтіңіз.", "Berik POS"); return; }
+            if (syncing) { Ui.Msg(this, "Синхрон жүріп жатыр, біраз күтіңіз."); return; }
             var st = await Task.Run(() => agent.Call("status", null, 15000));
             string cur = st.Str("server") ?? "";
             int pending = st.Int("pending");
             string q = "Қазіргі сервер: " + cur + "\n\n";
             if (pending > 0) q += "Жүктелмеген заказ: " + pending + ". Олар жаңа серверге жүктеледі. Ескі серверге керек болса, алдымен «Серверге жүктеу» басыңыз.\n\n";
             q += "Серверді ауыстырасыз ба? Меню жаңа серверден қайта жүктеледі, жергілікті заказдар өшпейді.";
-            if (MessageBox.Show(this, q, "Серверді ауыстыру", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
+            if (Ui.Msg(this, q, "Серверді ауыстыру", yesNo: true) != DialogResult.Yes) return;
             timer.Stop(); news.Stop();
             try
             {
@@ -548,86 +553,82 @@ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',
 
         void OpenPrinters()
         {
-            const string Same = "(клиент чегінің принтері)";
             var o = Opts();
-            using (var f = new Form { Text = "Принтер баптаулары", FormBorderStyle = FormBorderStyle.FixedDialog, MaximizeBox = false, MinimizeBox = false, StartPosition = FormStartPosition.CenterParent, ClientSize = new Size(480, 560), Font = new Font("Segoe UI", 10f) })
+            using (var f = new UiForm("Принтер баптаулары", 900))
             {
-                int y = 12;
-                Label L(string t) { var l = new Label { Text = t, Left = 20, Top = y + 4, Width = 170 }; f.Controls.Add(l); return l; }
-                ComboBox C(params string[] items) { var c = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Left = 200, Top = y, Width = 260 }; c.Items.AddRange(items); f.Controls.Add(c); y += 40; return c; }
+                int cw = f.ColW;
+                var printers = new List<string>();
+                try { foreach (string p in PrinterSettings.InstalledPrinters) printers.Add(p); } catch { }
+                string def = ""; try { def = new PrinterSettings().PrinterName; } catch { }
 
-                f.Controls.Add(new Label { Text = "Клиент чегі қай принтерге шықсын:", Left = 20, Top = y, AutoSize = true }); y += 26;
-                var cb = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Left = 20, Top = y, Width = 440 };
-                foreach (string p in PrinterSettings.InstalledPrinters) cb.Items.Add(p);
-                cb.SelectedItem = ChosenPrinter(); f.Controls.Add(cb); y += 44;
-                // Кухня чегі (админ ▸ Чек ▸ «Кухня чегі» қосулы болса): бөлек принтер, болмаса клиент чегінің принтері
-                f.Controls.Add(new Label { Text = "Кухня чегі қай принтерге шықсын:", Left = 20, Top = y, AutoSize = true }); y += 26;
-                var kc = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Left = 20, Top = y, Width = 440 };
-                kc.Items.Add(Same);
-                foreach (string p in PrinterSettings.InstalledPrinters) kc.Items.Add(p);
-                string kcNow = "";
-                try { if (File.Exists(KitchenFile)) kcNow = File.ReadAllText(KitchenFile).Trim(); } catch { }
-                if (kcNow != "" && kc.Items.Contains(kcNow)) kc.SelectedItem = kcNow; else kc.SelectedIndex = 0;
-                f.Controls.Add(kc); y += 52;
+                // 1. Принтерлер
+                var c1 = new UiCard("Принтерлер", cw);
+                var cb = new UiPicker();
+                foreach (var p in printers) cb.Add(p, p + (p == def ? "  · Windows әдепкі" : ""));
+                string cur = ""; try { if (File.Exists(PrinterFile)) cur = File.ReadAllText(PrinterFile).Trim(); } catch { }
+                cb.Value = cur != "" && printers.Contains(cur) ? cur : def;
+                if (cb.SelectedIndex < 0 && printers.Count > 0) cb.SelectedIndex = 0;
+                c1.Row("Клиент чегі", null, cb, true);
+                var kc = new UiPicker();
+                kc.Add("", "Клиент чегінің принтері");
+                foreach (var p in printers) kc.Add(p, p);
+                string kcNow = ""; try { if (File.Exists(KitchenFile)) kcNow = File.ReadAllText(KitchenFile).Trim(); } catch { }
+                kc.Value = printers.Contains(kcNow) ? kcNow : "";
+                c1.Row("Кухня чегі", "Админде «Кухня чегі» қосулы болса шығады", kc, true);
 
-                string[] paperK = { "printer", "58", "80", "a4", "fixed" };
-                L("Қағаз өлшемі"); var paper = C("Чек лентасы (авто, бір тұтас)", "58 мм лента", "80 мм лента", "A4", "Windows драйверінікі");
-                paper.SelectedIndex = Math.Max(0, Array.IndexOf(paperK, o["paper"]));
-                L("Лента ұзындығы, мм"); var len = new NumericUpDown { Left = 200, Top = y, Width = 100, Minimum = 0, Maximum = 3000, Increment = 10, Value = OptInt(o, "len", 0, 0, 3000) }; f.Controls.Add(len);
-                f.Controls.Add(new Label { Text = "0 = авто (чектің өз ұзындығы)", Left = 310, Top = y + 4, AutoSize = true, ForeColor = Color.Gray }); y += 40;
-                int[] marginK = { 0, 2, 5, 10 };
-                L("Чек ені, мм"); var rw = new NumericUpDown { Left = 200, Top = y, Width = 100, Minimum = 0, Maximum = 210, Value = OptInt(o, "rw", 0, 0, 210) }; f.Controls.Add(rw);
-                f.Controls.Add(new Label { Text = "0 = әдепкі (80 мм чекке 70)", Left = 310, Top = y + 4, AutoSize = true, ForeColor = Color.Gray }); y += 40;
-                L("Шеттері (поля)"); var margin = C("Жоқ", "Аз (2 мм)", "Орташа (5 мм)", "Стандарт (10 мм)");
-                margin.SelectedIndex = Math.Max(0, Array.IndexOf(marginK, OptInt(o, "margin", 0, 0, 30)));
-                L("Масштаб, %"); var scale = new NumericUpDown { Left = 200, Top = y, Width = 100, Minimum = 30, Maximum = 200, Increment = 5, Value = OptInt(o, "scale", 100, 30, 200) }; f.Controls.Add(scale); y += 40;
-                L("Көшірме саны"); var copies = new NumericUpDown { Left = 200, Top = y, Width = 100, Minimum = 1, Maximum = 9, Value = OptInt(o, "copies", 1, 1, 9) }; f.Controls.Add(copies); y += 40;
-                L("Бағдар"); var orient = C("Тік", "Жатық"); orient.SelectedIndex = o["orient"] == "landscape" ? 1 : 0;
-                L("Түс"); var color = C("Түсті", "Ақ-қара"); color.SelectedIndex = o["color"] == "gray" ? 1 : 0;
-                var header = new CheckBox { Text = "Жоғарғы/төменгі колонтитул (сайт сілтемесі, күні)", Left = 20, Top = y, Width = 440, Checked = o["header"] == "1" }; f.Controls.Add(header); y += 44;
+                // 2. Қағаз
+                var c2 = new UiCard("Қағаз", cw);
+                var paper = new UiPicker();
+                paper.Add("printer", "Чек лентасы (авто, бір тұтас)"); paper.Add("58", "58 мм лента"); paper.Add("80", "80 мм лента"); paper.Add("a4", "A4"); paper.Add("fixed", "Windows драйверінікі");
+                paper.Value = o["paper"]; if (paper.SelectedIndex < 0) paper.SelectedIndex = 0;
+                c2.Row("Қағаз өлшемі", null, paper, true);
+                var len = c2.Row("Лента ұзындығы", "0 = авто, чектің өз ұзындығы", new UiNum(OptInt(o, "len", 0, 0, 3000), 0, 3000, "мм"));
+                var rw = c2.Row("Чек ені", "0 = әдепкі (80 мм чекке 70)", new UiNum(OptInt(o, "rw", 0, 0, 210), 0, 210, "мм"));
+
+                // 3. Басып шығару
+                var c3 = new UiCard("Басып шығару", cw);
+                var margin = c3.Row("Шеттері", null, new UiSeg("0", "Жоқ", "2", "2 мм", "5", "5 мм", "10", "10 мм"));
+                margin.Value = OptInt(o, "margin", 0, 0, 30).ToString();
+                var scale = c3.Row("Масштаб", null, new UiNum(OptInt(o, "scale", 100, 30, 200), 30, 200, "%"));
+                var copies = c3.Row("Көшірме саны", null, new UiNum(OptInt(o, "copies", 1, 1, 9), 1, 9));
+                var orient = c3.Row("Бағдар", null, new UiSeg("portrait", "Тік", "landscape", "Жатық")); orient.Value = o["orient"];
+                var color = c3.Row("Түс", null, new UiSeg("color", "Түсті", "gray", "Ақ-қара")); color.Value = o["color"];
+                var header = c3.Row("Колонтитул", "Сайт сілтемесі мен күні", new UiSwitch { Checked = o["header"] == "1" });
+                f.AddCols(new Control[] { c1, c2 }, new Control[] { c3 });
 
                 void SaveAll()
                 {
-                    Save(cb, kc);
                     try
                     {
+                        Directory.CreateDirectory(Paths.Data);
+                        File.WriteAllText(PrinterFile, cb.Value ?? "");
+                        File.WriteAllText(KitchenFile, kc.Value ?? ""); // бос = клиент чегінің принтері
                         File.WriteAllLines(OptsFile, new[] {
-                            "paper=" + paperK[Math.Max(0, paper.SelectedIndex)],
-                            "margin=" + marginK[Math.Max(0, margin.SelectedIndex)],
-                            "scale=" + (int)scale.Value,
-                            "copies=" + (int)copies.Value,
-                            "orient=" + (orient.SelectedIndex == 1 ? "landscape" : "portrait"),
-                            "color=" + (color.SelectedIndex == 1 ? "gray" : "color"),
+                            "paper=" + (paper.Value ?? "printer"),
+                            "margin=" + margin.Value,
+                            "scale=" + scale.Value,
+                            "copies=" + copies.Value,
+                            "orient=" + orient.Value,
+                            "color=" + color.Value,
                             "header=" + (header.Checked ? "1" : "0"),
-                            "rw=" + (int)rw.Value,
-                            "len=" + (int)len.Value,
+                            "rw=" + rw.Value,
+                            "len=" + len.Value,
                         });
                     }
-                    catch { }
+                    catch (Exception ex) { Log.W("printer save: " + ex.Message); }
                 }
 
-                var ok = new Button { Text = "Сақтау", Left = 20, Top = y, Width = 140, Height = 34, DialogResult = DialogResult.OK };
-                var test = new Button { Text = "Сынақ чек", Left = 170, Top = y, Width = 140, Height = 34 };
-                var win = new Button { Text = "Windows...", Left = 320, Top = y, Width = 140, Height = 34 };
-                test.Click += async (s, e) => { SaveAll(); await TestPrint(false); if (kc.SelectedIndex > 0) await TestPrint(true); };
+                var ok = new UiButton("Сақтау", UiButton.Kind.Dark) { DialogResult = DialogResult.OK };
+                var test = new UiButton("Сынақ чек", UiButton.Kind.Light);
+                var win = new UiButton("Windows", UiButton.Kind.Light);
+                test.Click += async (s, e) => { SaveAll(); await TestPrint(false); if (!string.IsNullOrEmpty(kc.Value)) await TestPrint(true); };
                 win.Click += (s, e) => { try { System.Diagnostics.Process.Start("control", "printers"); } catch { } };
-                f.Controls.AddRange(new Control[] { ok, test, win });
-                f.ClientSize = new Size(480, y + 50);
+                f.AddFoot(ok, test, win);
                 f.AcceptButton = ok;
+                f.Finish(Math.Max(300, Screen.FromControl(this).WorkingArea.Height - 190));
                 if (f.ShowDialog(this) == DialogResult.OK) SaveAll();
             }
             _ = Refresh2();
-        }
-
-        static void Save(ComboBox cb, ComboBox kc)
-        {
-            try
-            {
-                Directory.CreateDirectory(Paths.Data);
-                File.WriteAllText(PrinterFile, cb.SelectedItem as string ?? "");
-                File.WriteAllText(KitchenFile, kc.SelectedIndex > 0 ? (kc.SelectedItem as string ?? "") : ""); // бос = клиент чегінің принтері
-            }
-            catch { }
         }
 
         async Task TestPrint(bool kitchen)

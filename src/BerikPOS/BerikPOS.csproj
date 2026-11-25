@@ -17,6 +17,11 @@
     <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3" PrivateAssets="all" />
   </ItemGroup>
   <ItemGroup>
+    <!-- Nunito (OFL): терезелер касса сайтындағы қаріппен -->
+    <EmbeddedResource Include="fonts\Nunito-Regular.ttf" LogicalName="Nunito-Regular.ttf" />
+    <EmbeddedResource Include="fonts\Nunito-SemiBold.ttf" LogicalName="Nunito-SemiBold.ttf" />
+  </ItemGroup>
+  <ItemGroup>
     <Reference Include="System.Web.Extensions" />
     <Reference Include="System.Net.Http" />
   </ItemGroup>
