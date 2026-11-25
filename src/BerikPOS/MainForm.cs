@@ -219,7 +219,8 @@ namespace BerikPOS
         async Task PrintSilent(CoreWebView2 cw, bool kitchen = false)
         {
             // Принтер әлі таңдалмаса — бірінші рет таңдатамыз
-            if (!File.Exists(PrinterFile)) OpenPrinters();
+            // Чек ешнәрсе сұрамай бірден шығады: принтер таңдалмаса — Windows-тың әдепкі принтері
+            // (баптау терезесі тек «Принтер» батырмасынан ашылады, user 2026-11-25)
             string printer = kitchen ? KitchenPrinter() : ChosenPrinter();
             try
             {
