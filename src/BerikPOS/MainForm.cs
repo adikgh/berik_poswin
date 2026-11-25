@@ -76,6 +76,7 @@ namespace BerikPOS
                 cw.Settings.AreDevToolsEnabled = false;
                 cw.Settings.IsZoomControlEnabled = true;
                 cw.NewWindowRequested += OnNewWindow;
+                HookStatic(cw);
                 await cw.AddScriptToExecuteOnDocumentCreatedAsync(BarJs);
                 cw.WebMessageReceived += OnBarCmd;
                 cw.NavigationCompleted += (s, a) => PushBar();
@@ -93,6 +94,49 @@ namespace BerikPOS
                 Ui.Msg(this, "Программа іске қосылмады:\n" + ex.Message + hint + "\n\nЛог: " + Paths.Logs, "Қате", error: true);
                 Close();
             }
+        }
+
+        // ===== Жылдамдық: /assets/ файлдарын (css, js, сурет, қаріп) PHP серверінен емес, программаның өзі береді =====
+        // PHP-нің ішкі сервері (php -S) сұрауларды бір-бірлеп орындайды: касса беті ашылғанда 40-қа жуық файл кезекке тұрып,
+        // бет баяу ашылатын, батырма басқанда (бет жаңарғанда) лагтайтын (user 2026-11-25). Енді PHP тек .php беттерін орындайды.
+        static readonly Dictionary<string, string> Mime = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            [".css"] = "text/css; charset=utf-8", [".js"] = "application/javascript; charset=utf-8", [".json"] = "application/json; charset=utf-8",
+            [".png"] = "image/png", [".jpg"] = "image/jpeg", [".jpeg"] = "image/jpeg", [".gif"] = "image/gif", [".webp"] = "image/webp",
+            [".svg"] = "image/svg+xml", [".ico"] = "image/x-icon", [".woff"] = "font/woff", [".woff2"] = "font/woff2", [".ttf"] = "font/ttf",
+            [".eot"] = "application/vnd.ms-fontobject", [".mp3"] = "audio/mpeg", [".wav"] = "audio/wav", [".ogg"] = "audio/ogg", [".map"] = "application/json",
+        };
+        readonly Dictionary<string, Tuple<DateTime, byte[]>> stCache = new Dictionary<string, Tuple<DateTime, byte[]>>(StringComparer.OrdinalIgnoreCase);
+        void HookStatic(CoreWebView2 cw)
+        {
+            try
+            {
+                cw.AddWebResourceRequestedFilter($"http://127.0.0.1:{engine.SitePort}/assets/*", CoreWebView2WebResourceContext.All);
+                cw.WebResourceRequested += OnStatic;
+            }
+            catch (Exception ex) { Log.W("static: " + ex.Message); }
+        }
+        void OnStatic(object sender, CoreWebView2WebResourceRequestedEventArgs e)
+        {
+            try
+            {
+                if (e.Request.Method != "GET") return;
+                var u = new Uri(e.Request.Uri);
+                string rel = Uri.UnescapeDataString(u.AbsolutePath).TrimStart('/');
+                if (rel.Contains("..") || rel.Contains(":")) return;
+                string mime; if (!Mime.TryGetValue(Path.GetExtension(rel), out mime)) return;
+                var fi = new FileInfo(Path.Combine(Paths.Www, "site", rel.Replace('/', '\\')));
+                if (!fi.Exists || fi.Length > 8 * 1024 * 1024) return; // жоқ болса — бұрынғыдай PHP-ге кетеді
+                Tuple<DateTime, byte[]> c;
+                if (!stCache.TryGetValue(fi.FullName, out c) || c.Item1 != fi.LastWriteTimeUtc)
+                {
+                    c = Tuple.Create(fi.LastWriteTimeUtc, File.ReadAllBytes(fi.FullName));
+                    if (fi.Length < 2 * 1024 * 1024) stCache[fi.FullName] = c;
+                }
+                e.Response = env.CreateWebResourceResponse(new MemoryStream(c.Item2), 200, "OK",
+                    "Content-Type: " + mime + "\r\nCache-Control: max-age=600\r\nAccess-Control-Allow-Origin: *");
+            }
+            catch (Exception ex) { Log.W("static: " + ex.Message); }
         }
 
         static bool HasEvergreen()
@@ -207,6 +251,7 @@ namespace BerikPOS
                 f.Show(this);
                 await wv.EnsureCoreWebView2Async(env);
                 var cw = wv.CoreWebView2;
+                HookStatic(cw);
                 cw.WindowCloseRequested += (s, a) => f.Close();
                 cw.NewWindowRequested += OnNewWindow;
                 if (hidden)
@@ -251,6 +296,7 @@ namespace BerikPOS
             {
                 await wv.EnsureCoreWebView2Async(env);
                 var cw = wv.CoreWebView2;
+                HookStatic(cw);
                 cw.NewWindowRequested += (s, a) => a.Handled = true;
                 cw.WindowCloseRequested += (s, a) => { }; // бет өзі жабам десе де — басып болғанша күтеміз
                 await cw.AddScriptToExecuteOnDocumentCreatedAsync("window.__berikPrint=window.print;window.print=function(){try{window.chrome.webview.postMessage('print')}catch(e){window.__berikPrint()}};window.close=function(){};");
