@@ -112,6 +112,48 @@ namespace BerikPOS
             return ChosenPrinter();
         }
 
+        // Басып шығару баптаулары (Data\print.txt, key=value): қағаз, шеттері, масштаб, көшірме, бағдар, түс, колонтитул.
+        // Браузердің «Печать» терезесіндегі баптаулар сияқты, бірақ бір рет сақталады да, чек диалогсыз шығады.
+        static string OptsFile => Path.Combine(Paths.Data, "print.txt");
+        static Dictionary<string, string> Opts()
+        {
+            var d = new Dictionary<string, string> { ["paper"] = "printer", ["margin"] = "0", ["scale"] = "100", ["copies"] = "1", ["orient"] = "portrait", ["color"] = "color", ["header"] = "0", ["rw"] = "0" };
+            try
+            {
+                if (File.Exists(OptsFile))
+                    foreach (var l in File.ReadAllLines(OptsFile)) { int i = l.IndexOf('='); if (i > 0) d[l.Substring(0, i).Trim()] = l.Substring(i + 1).Trim(); }
+            }
+            catch { }
+            return d;
+        }
+        static int OptInt(Dictionary<string, string> o, string k, int def, int min, int max)
+        {
+            int v; if (!int.TryParse(o.TryGetValue(k, out var s) ? s : "", out v)) v = def;
+            return Math.Max(min, Math.Min(max, v));
+        }
+        static void ApplyOpts(CoreWebView2PrintSettings ps)
+        {
+            var o = Opts();
+            ps.ShouldPrintBackgrounds = true;
+            ps.ShouldPrintHeaderAndFooter = o["header"] == "1";
+            double m = OptInt(o, "margin", 0, 0, 30) / 25.4; // мм → дюйм
+            ps.MarginTop = ps.MarginBottom = ps.MarginLeft = ps.MarginRight = m;
+            ps.ScaleFactor = OptInt(o, "scale", 100, 30, 200) / 100.0;
+            ps.Orientation = o["orient"] == "landscape" ? CoreWebView2PrintOrientation.Landscape : CoreWebView2PrintOrientation.Portrait;
+            switch (o["paper"])
+            {
+                case "58": ps.PageWidth = 58 / 25.4; ps.PageHeight = 297 / 25.4; break;
+                case "80": ps.PageWidth = 80 / 25.4; ps.PageHeight = 297 / 25.4; break;
+                case "a4": ps.PageWidth = 210 / 25.4; ps.PageHeight = 297 / 25.4; break;
+            }
+            try
+            {
+                ps.Copies = OptInt(o, "copies", 1, 1, 9);
+                ps.ColorMode = o["color"] == "gray" ? CoreWebView2PrintColorMode.Grayscale : CoreWebView2PrintColorMode.Color;
+            }
+            catch { }
+        }
+
         // Чек терезесі (order_print.php): көрінбейтін терезеде ашылады, window.print() ұсталып,
         // таңдалған принтерге диалогсыз шығарылады, сосын терезе өзі жабылады
         async void OnNewWindow(object sender, CoreWebView2NewWindowRequestedEventArgs e)
@@ -168,9 +210,11 @@ namespace BerikPOS
                 // Windows 10/11 (жаңа WebView2): нақты принтерге, диалогсыз
                 var ps = env.CreatePrintSettings();
                 if (!string.IsNullOrEmpty(printer)) ps.PrinterName = printer;
-                ps.ShouldPrintHeaderAndFooter = false;
-                ps.ShouldPrintBackgrounds = true;
-                ps.MarginTop = ps.MarginBottom = ps.MarginLeft = ps.MarginRight = 0;
+                ApplyOpts(ps);
+                // Чек ені (мм): сайттың print.css-індегі body ені (80 мм чекте 70 мм) орнына — шеттегі бос орын азаяды
+                int rw = OptInt(Opts(), "rw", 0, 0, 210);
+                if (rw > 0)
+                    try { await cw.ExecuteScriptAsync("(function(){var s=document.createElement('style');s.textContent='html,body{margin:0!important}body{width:" + rw + "mm!important;padding:0 1mm!important;box-sizing:border-box}';document.head?document.head.appendChild(s):document.documentElement.appendChild(s);})()"); } catch { }
                 var st = await cw.PrintAsync(ps);
                 Log.W($"print: {printer} -> {st}");
                 if (st == CoreWebView2PrintStatus.Succeeded) return;
@@ -282,28 +326,69 @@ namespace BerikPOS
         void OpenPrinters()
         {
             const string Same = "(клиент чегінің принтері)";
-            using (var f = new Form { Text = "Чек принтері", FormBorderStyle = FormBorderStyle.FixedDialog, MaximizeBox = false, MinimizeBox = false, StartPosition = FormStartPosition.CenterParent, ClientSize = new Size(460, 250), Font = new Font("Segoe UI", 10f) })
+            var o = Opts();
+            using (var f = new Form { Text = "Принтер баптаулары", FormBorderStyle = FormBorderStyle.FixedDialog, MaximizeBox = false, MinimizeBox = false, StartPosition = FormStartPosition.CenterParent, ClientSize = new Size(480, 560), Font = new Font("Segoe UI", 10f) })
             {
-                var cb = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Left = 20, Top = 40, Width = 380 };
+                int y = 12;
+                Label L(string t) { var l = new Label { Text = t, Left = 20, Top = y + 4, Width = 170 }; f.Controls.Add(l); return l; }
+                ComboBox C(params string[] items) { var c = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Left = 200, Top = y, Width = 260 }; c.Items.AddRange(items); f.Controls.Add(c); y += 40; return c; }
+
+                f.Controls.Add(new Label { Text = "Клиент чегі қай принтерге шықсын:", Left = 20, Top = y, AutoSize = true }); y += 26;
+                var cb = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Left = 20, Top = y, Width = 440 };
                 foreach (string p in PrinterSettings.InstalledPrinters) cb.Items.Add(p);
-                cb.SelectedItem = ChosenPrinter();
+                cb.SelectedItem = ChosenPrinter(); f.Controls.Add(cb); y += 44;
                 // Кухня чегі (админ ▸ Чек ▸ «Кухня чегі» қосулы болса): бөлек принтер, болмаса клиент чегінің принтері
-                var kc = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Left = 20, Top = 120, Width = 380 };
+                f.Controls.Add(new Label { Text = "Кухня чегі қай принтерге шықсын:", Left = 20, Top = y, AutoSize = true }); y += 26;
+                var kc = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Left = 20, Top = y, Width = 440 };
                 kc.Items.Add(Same);
                 foreach (string p in PrinterSettings.InstalledPrinters) kc.Items.Add(p);
                 string kcNow = "";
                 try { if (File.Exists(KitchenFile)) kcNow = File.ReadAllText(KitchenFile).Trim(); } catch { }
                 if (kcNow != "" && kc.Items.Contains(kcNow)) kc.SelectedItem = kcNow; else kc.SelectedIndex = 0;
-                var ok = new Button { Text = "Сақтау", Left = 20, Top = 180, Width = 120, Height = 34, DialogResult = DialogResult.OK };
-                var test = new Button { Text = "Сынақ чек", Left = 150, Top = 180, Width = 120, Height = 34 };
-                var win = new Button { Text = "Windows...", Left = 280, Top = 180, Width = 120, Height = 34 };
-                test.Click += async (s, e) => { Save(cb, kc); await TestPrint(false); if (kc.SelectedIndex > 0) await TestPrint(true); };
+                f.Controls.Add(kc); y += 52;
+
+                string[] paperK = { "printer", "58", "80", "a4" };
+                L("Қағаз өлшемі"); var paper = C("Принтердікі", "58 мм (чек)", "80 мм (чек)", "A4");
+                paper.SelectedIndex = Math.Max(0, Array.IndexOf(paperK, o["paper"]));
+                int[] marginK = { 0, 2, 5, 10 };
+                L("Чек ені, мм"); var rw = new NumericUpDown { Left = 200, Top = y, Width = 100, Minimum = 0, Maximum = 210, Value = OptInt(o, "rw", 0, 0, 210) }; f.Controls.Add(rw);
+                f.Controls.Add(new Label { Text = "0 = әдепкі (80 мм чекке 70)", Left = 310, Top = y + 4, AutoSize = true, ForeColor = Color.Gray }); y += 40;
+                L("Шеттері (поля)"); var margin = C("Жоқ", "Аз (2 мм)", "Орташа (5 мм)", "Стандарт (10 мм)");
+                margin.SelectedIndex = Math.Max(0, Array.IndexOf(marginK, OptInt(o, "margin", 0, 0, 30)));
+                L("Масштаб, %"); var scale = new NumericUpDown { Left = 200, Top = y, Width = 100, Minimum = 30, Maximum = 200, Increment = 5, Value = OptInt(o, "scale", 100, 30, 200) }; f.Controls.Add(scale); y += 40;
+                L("Көшірме саны"); var copies = new NumericUpDown { Left = 200, Top = y, Width = 100, Minimum = 1, Maximum = 9, Value = OptInt(o, "copies", 1, 1, 9) }; f.Controls.Add(copies); y += 40;
+                L("Бағдар"); var orient = C("Тік", "Жатық"); orient.SelectedIndex = o["orient"] == "landscape" ? 1 : 0;
+                L("Түс"); var color = C("Түсті", "Ақ-қара"); color.SelectedIndex = o["color"] == "gray" ? 1 : 0;
+                var header = new CheckBox { Text = "Жоғарғы/төменгі колонтитул (сайт сілтемесі, күні)", Left = 20, Top = y, Width = 440, Checked = o["header"] == "1" }; f.Controls.Add(header); y += 44;
+
+                void SaveAll()
+                {
+                    Save(cb, kc);
+                    try
+                    {
+                        File.WriteAllLines(OptsFile, new[] {
+                            "paper=" + paperK[Math.Max(0, paper.SelectedIndex)],
+                            "margin=" + marginK[Math.Max(0, margin.SelectedIndex)],
+                            "scale=" + (int)scale.Value,
+                            "copies=" + (int)copies.Value,
+                            "orient=" + (orient.SelectedIndex == 1 ? "landscape" : "portrait"),
+                            "color=" + (color.SelectedIndex == 1 ? "gray" : "color"),
+                            "header=" + (header.Checked ? "1" : "0"),
+                            "rw=" + (int)rw.Value,
+                        });
+                    }
+                    catch { }
+                }
+
+                var ok = new Button { Text = "Сақтау", Left = 20, Top = y, Width = 140, Height = 34, DialogResult = DialogResult.OK };
+                var test = new Button { Text = "Сынақ чек", Left = 170, Top = y, Width = 140, Height = 34 };
+                var win = new Button { Text = "Windows...", Left = 320, Top = y, Width = 140, Height = 34 };
+                test.Click += async (s, e) => { SaveAll(); await TestPrint(false); if (kc.SelectedIndex > 0) await TestPrint(true); };
                 win.Click += (s, e) => { try { System.Diagnostics.Process.Start("control", "printers"); } catch { } };
-                f.Controls.Add(new Label { Text = "Клиент чегі қай принтерге шықсын:", Left = 20, Top = 12, AutoSize = true });
-                f.Controls.Add(new Label { Text = "Кухня чегі қай принтерге шықсын:", Left = 20, Top = 92, AutoSize = true });
-                f.Controls.AddRange(new Control[] { cb, kc, ok, test, win });
+                f.Controls.AddRange(new Control[] { ok, test, win });
+                f.ClientSize = new Size(480, y + 50);
                 f.AcceptButton = ok;
-                if (f.ShowDialog(this) == DialogResult.OK) Save(cb, kc);
+                if (f.ShowDialog(this) == DialogResult.OK) SaveAll();
             }
             _ = Refresh2();
         }
