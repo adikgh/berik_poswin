@@ -75,8 +75,11 @@ namespace BerikPOS
                 cw.Settings.AreDevToolsEnabled = false;
                 cw.Settings.IsZoomControlEnabled = true;
                 cw.NewWindowRequested += OnNewWindow;
+                await cw.AddScriptToExecuteOnDocumentCreatedAsync(BarJs);
+                cw.WebMessageReceived += OnBarCmd;
+                cw.NavigationCompleted += (s, a) => PushBar();
                 cw.Navigate($"http://127.0.0.1:{engine.SitePort}/");
-                splash.Visible = false; web.Visible = true; bar.Visible = true;
+                splash.Visible = false; web.Visible = true; // жоғарғы жолақ жоқ: күйі мен батырмалары кассаның өз мәзірінде (BarJs)
                 await Refresh2();
                 timer.Start(); news.Start();
                 await Sync("auto", false);
@@ -301,7 +304,7 @@ namespace BerikPOS
         {
             if (agent == null || syncing) { if (manual && syncing) MessageBox.Show(this, "Синхрон жүріп жатыр, біраз күтіңіз.", "Berik POS"); return; }
             syncing = true;
-            if (manual) { lblInfo.Text = action == "menu" ? "Меню жаңартылуда..." : "Серверге жүктелуде..."; UseWaitCursor = true; }
+            if (manual) { lblInfo.Text = action == "menu" ? "Меню жаңартылуда..." : "Серверге жүктелуде..."; barBusy = lblInfo.Text; PushBar(); UseWaitCursor = true; }
             try
             {
                 var r = await Task.Run(() => agent.Call(action));
@@ -357,6 +360,7 @@ namespace BerikPOS
             netUp = online;
             lblNet.Text = online ? "● Онлайн" : "● Офлайн";
             lblNet.ForeColor = online ? Color.FromArgb(22, 150, 70) : Color.FromArgb(200, 60, 40);
+            PushBar();
         }
 
         async Task Refresh2()
@@ -365,7 +369,82 @@ namespace BerikPOS
             var st = await Task.Run(() => agent.Call("status", null, 15000));
             if (string.IsNullOrEmpty(lblNet.Text)) SetNet(false);
             lblInfo.Text = $"Жүктелмеген заказ: {st.Int("pending")}   ·   Соңғы жүктеу: {st.Str("last_push") ?? "—"}";
+            barPending = st.Int("pending"); barLast = st.Str("last_push") ?? "—"; barBusy = "";
+            PushBar();
         }
+
+        // ===== Кассаның өз мәзіріндегі программа батырмасы (бұрынғы жоғарғы жолақтың орнына, user 2026-11-25) =====
+        int barPending; string barLast = "—", barBusy = "";
+        static string J(string v) => "\"" + (v ?? "").Replace("\\", "\\\\").Replace("\"", "\\\"").Replace("\n", " ").Replace("\r", " ") + "\"";
+        void PushBar()
+        {
+            try
+            {
+                var cw = web.CoreWebView2; if (cw == null) return;
+                _ = cw.ExecuteScriptAsync("window.__bpw&&window.__bpw({on:" + (netUp ? "true" : "false") + ",pending:" + barPending + ",last:" + J(barLast) + ",busy:" + J(barBusy) + "})");
+            }
+            catch { }
+        }
+        async void OnBarCmd(object sender, CoreWebView2WebMessageReceivedEventArgs e)
+        {
+            string m; try { m = e.TryGetWebMessageAsString(); } catch { return; }
+            switch (m)
+            {
+                case "bpw:menu": await Sync("menu", true); break;
+                case "bpw:push": await Sync("push", true); break;
+                case "bpw:printer": OpenPrinters(); break;
+                case "bpw:server": await ChangeServer(); break;
+            }
+        }
+        // Онлайн/Офлайн белгісі «Касса-…» блогында (аты мен иконкасының жанында); басқанда толығы ашылады
+        const string BarJs = @"(function(){
+if(window.top!==window||window.__bpw)return;
+var st={on:false,pending:0,last:'—',busy:''},el;
+var ON='<svg viewBox=""0 0 24 24"" width=""20"" height=""20"" fill=""none"" stroke=""currentColor"" stroke-width=""2"" stroke-linecap=""round"" stroke-linejoin=""round""><path d=""M5 12.55a11 11 0 0 1 14.08 0""/><path d=""M1.42 9a16 16 0 0 1 21.16 0""/><path d=""M8.53 16.11a6 6 0 0 1 6.95 0""/><line x1=""12"" y1=""20"" x2=""12.01"" y2=""20""/></svg>';
+var OFF='<svg viewBox=""0 0 24 24"" width=""20"" height=""20"" fill=""none"" stroke=""currentColor"" stroke-width=""2"" stroke-linecap=""round"" stroke-linejoin=""round""><line x1=""1"" y1=""1"" x2=""23"" y2=""23""/><path d=""M16.72 11.06A10.94 10.94 0 0 1 19 12.55""/><path d=""M5 12.55a10.94 10.94 0 0 1 5.17-2.39""/><path d=""M10.71 5.05A16 16 0 0 1 22.58 9""/><path d=""M1.42 9a15.91 15.91 0 0 1 4.7-2.88""/><path d=""M8.53 16.11a6 6 0 0 1 6.95 0""/><line x1=""12"" y1=""20"" x2=""12.01"" y2=""20""/></svg>';
+var css='.bpw{position:relative;display:flex;align-items:center;justify-content:center;width:40px;height:40px;margin-right:8px;flex:0 0 auto;border-radius:12px;cursor:pointer;user-select:none;pointer-events:auto;color:#c83c28;background:#fdecea;font-family:Nunito,Segoe UI,sans-serif}'
++'.bpw.on{color:#16964a;background:#e8f6ee}.bpw.busy svg{animation:bpwp 1s infinite}@keyframes bpwp{50%{opacity:.35}}'
++'.bpw_fix{position:fixed;top:8px;right:8px;z-index:99999}'
++'.bpw_n{position:absolute;top:-5px;right:-5px;background:#f59e0b;color:#fff;border-radius:10px;padding:0 6px;font-size:11px;font-weight:700;line-height:17px}'
++'.bpw_m{display:none;position:absolute;right:0;top:calc(100% + 8px);background:#fff;color:#222;border-radius:12px;box-shadow:0 8px 30px rgba(0,0,0,.16);padding:6px;min-width:260px;z-index:99999;cursor:default;text-align:left}'
++'.bpw.open .bpw_m{display:block}'
++'.bpw_s{padding:8px 12px 2px;font-size:14px;font-weight:700}.bpw.on .bpw_s{color:#16964a}.bpw:not(.on) .bpw_s{color:#c83c28}'
++'.bpw_h{padding:2px 12px 10px;color:#666;font-size:12.5px;font-weight:500;line-height:1.6;border-bottom:1px solid #eee;margin-bottom:4px;white-space:normal}'
++'.bpw_i{padding:10px 12px;border-radius:8px;cursor:pointer;font-size:14px;font-weight:600;white-space:nowrap}.bpw_i:hover{background:#f3f4f6}';
+function msg(c){try{window.chrome.webview.postMessage(c)}catch(e){}}
+function draw(){
+ if(!el)return;
+ el.className='bpw'+(st.on?' on':'')+(st.busy?' busy':'')+(el.__fix?' bpw_fix':'')+(el.__open?' open':'');
+ el.title=st.busy||(st.on?'Онлайн':'Офлайн');
+ el.querySelector('.bpw_ic').innerHTML=st.on?ON:OFF;
+ var n=el.querySelector('.bpw_n');n.style.display=st.pending>0?'':'none';n.textContent=st.pending;
+ el.querySelector('.bpw_s').textContent=st.busy||(st.on?'● Онлайн':'● Офлайн');
+ el.querySelector('.bpw_h').innerHTML='Жүктелмеген заказ: <b>'+st.pending+'</b><br>Соңғы жүктеу: '+String(st.last).replace(/</g,'&lt;');
+}
+function mount(){
+ if(el&&document.body.contains(el))return;
+ if(!document.getElementById('bpw_css')){var s=document.createElement('style');s.id='bpw_css';s.textContent=css;(document.head||document.documentElement).appendChild(s);}
+ el=document.createElement('div');
+ el.innerHTML='<span class=""bpw_ic""></span><span class=""bpw_n""></span>'
+ +'<div class=""bpw_m""><div class=""bpw_s""></div><div class=""bpw_h""></div>'
+ +'<div class=""bpw_i"" data-c=""bpw:push"">Серверге жүктеу</div>'
+ +'<div class=""bpw_i"" data-c=""bpw:menu"">Менюді жаңарту</div>'
+ +'<div class=""bpw_i"" data-c=""bpw:printer"">Принтер</div>'
+ +'<div class=""bpw_i"" data-c=""bpw:server"">Сервер</div></div>';
+ var host=document.querySelector('.ub1_lx');
+ if(host){host.insertBefore(el,host.firstChild);}else{el.__fix=true;document.body.appendChild(el);}
+ el.addEventListener('click',function(e){
+  e.stopPropagation();
+  var i=e.target.closest('.bpw_i');
+  if(i){el.__open=false;draw();msg(i.getAttribute('data-c'));return;}
+  if(!e.target.closest('.bpw_m')){el.__open=!el.__open;draw();}
+ });
+ document.addEventListener('click',function(e){if(el.__open&&!el.contains(e.target)){el.__open=false;draw();}});
+ draw();
+}
+window.__bpw=function(s){st=s;if(document.body)mount();draw();};
+if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',mount);else mount();
+})();";
 
         // Орнатқаннан кейін де серверді ауыстыруға болады (мысалы, локал сервер → интернеттегі сервер)
         async Task ChangeServer()
