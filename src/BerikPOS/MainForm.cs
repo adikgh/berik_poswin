@@ -120,7 +120,7 @@ namespace BerikPOS
         static string OptsFile => Path.Combine(Paths.Data, "print.txt");
         static Dictionary<string, string> Opts()
         {
-            var d = new Dictionary<string, string> { ["paper"] = "printer", ["margin"] = "0", ["scale"] = "100", ["copies"] = "1", ["orient"] = "portrait", ["color"] = "color", ["header"] = "0", ["rw"] = "0" };
+            var d = new Dictionary<string, string> { ["paper"] = "printer", ["margin"] = "0", ["scale"] = "100", ["copies"] = "1", ["orient"] = "portrait", ["color"] = "color", ["header"] = "0", ["rw"] = "0", ["len"] = "0" };
             try
             {
                 if (File.Exists(OptsFile))
@@ -149,7 +149,10 @@ namespace BerikPOS
             // (драйвердің қысқа қағаз өлшемі, мысалы 80×80, чекті бірнеше бөлікке бөліп, арасына бос орын қалдыратын, user 2026-11-25).
             int rw0 = OptInt(o, "rw", 0, 0, 210);
             double rollW = (o["paper"] == "58" || (o["paper"] == "printer" && rw0 > 0 && rw0 <= 58) ? 58 : 80) / 25.4;
-            double h = contentIn > 0 ? Math.Max(2.0, Math.Min(120.0, contentIn * sc / 100.0 + 2 * m + 0.4)) : 297 / 25.4;
+            // Лента ұзындығы: «len» мм берілсе — соны (мысалы 270/300), 0 болса — чектің өз ұзындығы (авто)
+            int len = OptInt(o, "len", 0, 0, 3000);
+            double h = len >= 30 ? len / 25.4
+                : contentIn > 0 ? Math.Max(2.0, Math.Min(120.0, contentIn * sc / 100.0 + 2 * m + 0.4)) : 297 / 25.4;
             switch (o["paper"])
             {
                 case "a4": ps.PageWidth = 210 / 25.4; ps.PageHeight = 297 / 25.4; break;
@@ -570,6 +573,8 @@ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',
                 string[] paperK = { "printer", "58", "80", "a4", "fixed" };
                 L("Қағаз өлшемі"); var paper = C("Чек лентасы (авто, бір тұтас)", "58 мм лента", "80 мм лента", "A4", "Windows драйверінікі");
                 paper.SelectedIndex = Math.Max(0, Array.IndexOf(paperK, o["paper"]));
+                L("Лента ұзындығы, мм"); var len = new NumericUpDown { Left = 200, Top = y, Width = 100, Minimum = 0, Maximum = 3000, Increment = 10, Value = OptInt(o, "len", 0, 0, 3000) }; f.Controls.Add(len);
+                f.Controls.Add(new Label { Text = "0 = авто (чектің өз ұзындығы)", Left = 310, Top = y + 4, AutoSize = true, ForeColor = Color.Gray }); y += 40;
                 int[] marginK = { 0, 2, 5, 10 };
                 L("Чек ені, мм"); var rw = new NumericUpDown { Left = 200, Top = y, Width = 100, Minimum = 0, Maximum = 210, Value = OptInt(o, "rw", 0, 0, 210) }; f.Controls.Add(rw);
                 f.Controls.Add(new Label { Text = "0 = әдепкі (80 мм чекке 70)", Left = 310, Top = y + 4, AutoSize = true, ForeColor = Color.Gray }); y += 40;
@@ -595,6 +600,7 @@ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',
                             "color=" + (color.SelectedIndex == 1 ? "gray" : "color"),
                             "header=" + (header.Checked ? "1" : "0"),
                             "rw=" + (int)rw.Value,
+                            "len=" + (int)len.Value,
                         });
                     }
                     catch { }
