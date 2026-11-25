@@ -138,8 +138,10 @@ namespace BerikPOS
             ps.ShouldPrintHeaderAndFooter = o["header"] == "1";
             double m = OptInt(o, "margin", 0, 0, 30) / 25.4; // мм → дюйм
             ps.MarginTop = ps.MarginBottom = ps.MarginLeft = ps.MarginRight = m;
-            ps.ScaleFactor = OptInt(o, "scale", 100, 30, 200) / 100.0;
-            ps.Orientation = o["orient"] == "landscape" ? CoreWebView2PrintOrientation.Landscape : CoreWebView2PrintOrientation.Portrait;
+            // Әдепкі мәннен өзгергенін ғана береміз: кейбір чек принтерінің драйвері түс/көшірме баптауын қабылдамай, чек шықпай қалуы мүмкін
+            int sc = OptInt(o, "scale", 100, 30, 200);
+            if (sc != 100) ps.ScaleFactor = sc / 100.0;
+            if (o["orient"] == "landscape") ps.Orientation = CoreWebView2PrintOrientation.Landscape;
             switch (o["paper"])
             {
                 case "58": ps.PageWidth = 58 / 25.4; ps.PageHeight = 297 / 25.4; break;
@@ -148,8 +150,9 @@ namespace BerikPOS
             }
             try
             {
-                ps.Copies = OptInt(o, "copies", 1, 1, 9);
-                ps.ColorMode = o["color"] == "gray" ? CoreWebView2PrintColorMode.Grayscale : CoreWebView2PrintColorMode.Color;
+                int cp = OptInt(o, "copies", 1, 1, 9);
+                if (cp > 1) ps.Copies = cp;
+                if (o["color"] == "gray") ps.ColorMode = CoreWebView2PrintColorMode.Grayscale;
             }
             catch { }
         }
@@ -170,8 +173,13 @@ namespace BerikPOS
             try
             {
                 bool isPrint = e.Uri.Contains("print");
-                var f = new Form { Text = "Berik POS", ShowInTaskbar = !isPrint, StartPosition = FormStartPosition.Manual, Size = new Size(600, 700), Location = isPrint ? new Point(-3000, -3000) : new Point(Left + 100, Top + 60) };
-                if (isPrint) { f.FormBorderStyle = FormBorderStyle.None; f.Opacity = 0; } // чек терезесі көрінбейді
+                // Бос терезе (window.open('') — QR/сайт заказын қабылдағанда чек терезесі алдын ала ашылады,
+                // сосын order_print.php-ге ауысады): ол да чек болуы мүмкін, сондықтан әзірге жасырын ашамыз.
+                // Чек емес бетке ауысса — көрсетеміз
+                bool blank = string.IsNullOrEmpty(e.Uri) || e.Uri.StartsWith("about:");
+                bool hidden = isPrint || blank;
+                var f = new Form { Text = "Berik POS", ShowInTaskbar = !hidden, StartPosition = FormStartPosition.Manual, Size = new Size(600, 700), Location = hidden ? new Point(-3000, -3000) : new Point(Left + 100, Top + 60) };
+                if (hidden) { f.FormBorderStyle = FormBorderStyle.None; f.Opacity = 0; } // чек терезесі көрінбейді
                 var wv = new WebView2 { Dock = DockStyle.Fill };
                 f.Controls.Add(wv);
                 f.Show(this);
@@ -179,19 +187,27 @@ namespace BerikPOS
                 var cw = wv.CoreWebView2;
                 cw.WindowCloseRequested += (s, a) => f.Close();
                 cw.NewWindowRequested += OnNewWindow;
-                if (isPrint)
+                if (hidden)
                 {
+                    if (blank)
+                        cw.NavigationStarting += (s, a) =>
+                        {
+                            if (!hidden || a.Uri.Contains("print") || a.Uri.StartsWith("about:")) return;
+                            hidden = false; // чек емес бет — кәдімгі терезе
+                            f.FormBorderStyle = FormBorderStyle.Sizable; f.ShowInTaskbar = true;
+                            f.Location = new Point(Left + 100, Top + 60); f.Opacity = 1;
+                        };
                     await cw.AddScriptToExecuteOnDocumentCreatedAsync("window.__berikPrint=window.print;window.print=function(){try{window.chrome.webview.postMessage('print')}catch(e){window.__berikPrint()}};");
                     bool done = false;
                     cw.WebMessageReceived += async (s, a) =>
                     {
-                        if (done || a.TryGetWebMessageAsString() != "print") return;
+                        if (done || !hidden || a.TryGetWebMessageAsString() != "print") return;
                         done = true;
-                        await PrintSilent(cw, e.Uri.Contains("kind=kitchen")); // кухня чегі — кухня принтеріне
+                        await PrintSilent(cw, (cw.Source ?? e.Uri).Contains("kind=kitchen")); // кухня чегі — кухня принтеріне
                         await Task.Delay(500);
                         if (!f.IsDisposed) f.Close();
                     };
-                    var t = new Timer { Interval = 30000 }; t.Tick += (s, a) => { t.Stop(); if (!f.IsDisposed) f.Close(); }; t.Start();
+                    var t = new Timer { Interval = 30000 }; t.Tick += (s, a) => { t.Stop(); if (hidden && !f.IsDisposed) f.Close(); }; t.Start();
                 }
                 e.NewWindow = cw;
                 e.Handled = true;
