@@ -54,7 +54,8 @@
 		try { $r['state'] = state(); } catch (Throwable $e) { $r['state'] = ['ok' => false, 'error' => $e->getMessage()]; }
 		// Программа жаңарғаннан кейін бір рет менюді (құрылым + анықтамалықтар) қайта тартамыз:
 		// сайттағы жаңа бағандар мен кестелер (мысалы, бірнеше касса, акциялар, чек баптауы, аудармалар) кассаға жетеді
-		if (@$s['pull_ver'] !== APP_VER) { try { $r['pull'] = pull(); } catch (Throwable $e) { $r['pull'] = ['ok' => false, 'error' => $e->getMessage()]; } }
+		// Админдегі баптаулар (автомат чек, чек түрлері, меню, стоп-лист) 15 минут сайын өзі келеді — «Менюді жаңарту» баспай-ақ (user 2026-11-25)
+		if (@$s['pull_ver'] !== APP_VER || strtotime((string)@$s['last_pull']) < time() - 900) { try { $r['pull'] = pull(); } catch (Throwable $e) { $r['pull'] = ['ok' => false, 'error' => $e->getMessage()]; } }
 		out($r);
 	}
 	fail('bad_action');
