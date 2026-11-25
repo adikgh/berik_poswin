@@ -26,12 +26,53 @@ UninstallDisplayIcon={app}\BerikPOS.exe
 CloseApplications=yes
 RestartApplications=no
 WizardStyle=modern
+; Касса дизайнындағы суреттер (жасыл, Berik белгісі); Inno экран масштабына қарай керек өлшемін өзі таңдайды
+WizardImageFile=img\wizard100.bmp,img\wizard125.bmp,img\wizard150.bmp,img\wizard175.bmp,img\wizard200.bmp,img\wizard225.bmp,img\wizard250.bmp
+WizardSmallImageFile=img\small100.bmp,img\small125.bmp,img\small150.bmp,img\small175.bmp,img\small200.bmp,img\small225.bmp,img\small250.bmp
+WizardImageStretch=no
+DisableWelcomePage=no
+DisableReadyPage=yes
+AppPublisherURL=https://berik.gprog.kz
 
 [Languages]
 Name: "ru"; MessagesFile: "compiler:Languages\Russian.isl"
 
+; Орнатқыш мәтіндері қазақша (Inno-да қазақ тілі жоқ, сондықтан орыс тілінің үстінен жазамыз)
+[Messages]
+SetupAppTitle=Berik POS орнату
+SetupWindowTitle=Berik POS орнату
+WelcomeLabel1=Berik POS-қа қош келдіңіз
+WelcomeLabel2=Компьютерге Berik POS кассасы орнатылады: интернетсіз де сатады, интернет келгенде өзі серверге жүктейді.%n%nОрнатар алдында басқа программаларды жабыңыз.
+ButtonBack=< Артқа
+ButtonNext=Әрі қарай >
+ButtonInstall=Орнату
+ButtonCancel=Бас тарту
+ButtonFinish=Дайын
+ButtonYes=Иә
+ButtonNo=Жоқ
+ExitSetupTitle=Орнатудан шығу
+ExitSetupMessage=Орнату әлі біткен жоқ. Қазір шықсаңыз, программа орнатылмайды.%n%nОрнатуды кейін қайта бастай аласыз.%n%nШығасыз ба?
+WizardSelectTasks=Қосымша
+SelectTasksDesc=Тағы не істейміз?
+SelectTasksLabel2=Керегін белгілеп, «Әрі қарай» басыңыз.
+WizardReady=Орнатуға дайын
+ReadyLabel1=Berik POS орнатуға дайын.
+ReadyLabel2a=«Орнату» басыңыз.
+WizardPreparing=Дайындалуда
+PreparingDesc=Berik POS орнатуға дайындалуда.
+WizardInstalling=Орнатылуда
+InstallingLabel=Berik POS орнатылуда, біраз күтіңіз.
+StatusExtractFiles=Файлдар көшірілуде...
+StatusCreateIcons=Белгішелер жасалуда...
+StatusRunProgram=Аяқталуда...
+FinishedHeadingLabel=Berik POS орнатылды
+FinishedLabelNoIcons=Berik POS компьютерге орнатылды.
+FinishedLabel=Berik POS компьютерге орнатылды. Жұмыс үстеліндегі белгішеден ашасыз.
+ClickFinish=«Дайын» басыңыз.
+SetupLdrStartupMessage=Berik POS орнатылады. Жалғастырамыз ба?
+
 [Tasks]
-Name: "desktopicon"; Description: "Жұмыс үстеліне белгіше"; GroupDescription: "Қосымша:"
+Name: "desktopicon"; Description: "Жұмыс үстеліне белгіше қою"; GroupDescription: "Белгіше:"
 
 [Dirs]
 ; Программа өз папкасына жаза алуы керек (db.php, иконкалар)

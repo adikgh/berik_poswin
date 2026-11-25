@@ -36,8 +36,8 @@ namespace BerikPOS
                 if (rel["assets"] is System.Collections.ArrayList assets)
                     foreach (var a in assets) if (a is Dictionary<string, object> d && (d.Str("name") ?? "").EndsWith(".exe", StringComparison.OrdinalIgnoreCase)) url = d.Str("browser_download_url");
                 if (url == null) return;
-                if (MessageBox.Show(owner, $"Жаңа нұсқа бар: {tag}\nҚазір жаңартамыз ба? Программа 1–2 минутқа жабылып, өзі қайта ашылады.\nЗаказдар өшпейді.",
-                    "Berik POS жаңарту", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
+                if (Ui.Msg(owner, $"Жаңа нұсқа бар: {tag}\nҚазір жаңартамыз ба? Программа 1–2 минутқа жабылып, өзі қайта ашылады. Заказдар өшпейді.",
+                    "Жаңарту", yesNo: true) != DialogResult.Yes) return;
                 string file = Path.Combine(Path.GetTempPath(), "BerikPOS-Setup-" + tag + ".exe");
                 await Task.Run(() => { var wc = new WebClient(); wc.Headers["User-Agent"] = "BerikPOS"; wc.DownloadFile(url, file); });
                 await pushFirst();

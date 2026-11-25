@@ -9,38 +9,35 @@ using System.Windows.Forms;
 namespace BerikPOS
 {
     // Бірінші кіру: кассаны серверге байлау және бүкіл деректі тарту
-    class SetupForm : Form
+    class SetupForm : UiForm
     {
         readonly Agent agent;
-        readonly TextBox server = new TextBox(), code = new TextBox { MaxLength = 10 };
-        readonly ComboBox branch = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Visible = false };
-        readonly Label branchLbl = new Label { Text = "Точка:", Visible = false, AutoSize = true };
-        readonly Label msg = new Label { AutoSize = false, Height = 40, ForeColor = Color.FromArgb(190, 50, 40) };
-        readonly Button ok = new Button { Text = "Кіру және деректі жүктеу", Height = 38 };
+        readonly UiText server = new UiText(), code = new UiText("", 10);
+        readonly UiPicker branch = new UiPicker { Visible = false };
+        readonly Label branchLbl;
+        readonly Label msg;
+        readonly UiButton ok = new UiButton("Кіру және деректі жүктеу", UiButton.Kind.Dark);
 
-        public SetupForm(Agent a, string currentServer = null)
+        public SetupForm(Agent a, string currentServer = null) : base("Кассаны байлау", 480)
         {
             agent = a;
-            Text = "Berik POS — кассаны байлау";
-            FormBorderStyle = FormBorderStyle.FixedDialog; MaximizeBox = false; MinimizeBox = false;
+            ShowInTaskbar = true;
             StartPosition = FormStartPosition.CenterScreen;
-            ClientSize = new Size(420, 400);
-            Font = new Font("Segoe UI", 10f);
-
-            var p = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(24), ColumnCount = 1 };
-            Label L(string t) => new Label { Text = t, AutoSize = true, Margin = new Padding(0, 8, 0, 2) };
-            p.Controls.Add(new Label { Text = "Бірінші рет интернетпен кіру керек. Компания кодын енгізіңіз, кейін кассирлер өз PIN-кодымен кіреді, интернетсіз де.", AutoSize = false, Height = 44, Width = 370 });
-            p.Controls.Add(L("Сервер адресі:")); p.Controls.Add(server);
-            p.Controls.Add(L("Компания коды (мысалы: n135):")); p.Controls.Add(code);
-            p.Controls.Add(branchLbl); p.Controls.Add(branch);
-            p.Controls.Add(msg); p.Controls.Add(ok);
-            foreach (Control c in p.Controls) if (!(c is Label)) c.Width = 370;
-            msg.Width = 370;
-            Controls.Add(p);
+            Label L(string t, bool muted = false) => Ui.Para(t, muted ? Ui.F(10.5f) : Ui.Semi(10.5f), muted ? Ui.Muted : Ui.Text, Inner);
+            AddBody(L("Бірінші рет интернетпен кіру керек. Компания кодын енгізіңіз, кейін кассирлер өз PIN-кодымен кіреді, интернетсіз де.", true), 18);
+            AddBody(L("Сервер адресі"), 6); AddBody(server, 16);
+            AddBody(L("Компания коды (мысалы: n135)"), 6); AddBody(code, 16);
+            branchLbl = L("Точка"); branchLbl.Visible = false;
+            AddBody(branchLbl, 6); AddBody(branch, 16);
+            msg = new Label { AutoSize = false, Height = 44, ForeColor = Ui.Red, Font = Ui.F(10f), BackColor = Color.Transparent };
+            AddBody(msg, 0);
+            AddFoot(ok);
             AcceptButton = ok;
+            Finish();
 
             server.Text = string.IsNullOrEmpty(currentServer) ? DefaultServer() : currentServer;
             ok.Click += async (s, e) => await Go();
+            Shown += (s, e) => code.Box.Focus();
         }
 
         static string DefaultServer()
@@ -52,25 +49,25 @@ namespace BerikPOS
 
         async Task Go()
         {
-            msg.Text = ""; ok.Enabled = false; ok.Text = "Жүктелуде... (бірнеше минут болуы мүмкін)"; UseWaitCursor = true;
+            msg.Text = ""; ok.Enabled = false; ok.Text = "Жүктелуде... (бірнеше минут болуы мүмкін)"; ok.Invalidate(); UseWaitCursor = true;
             try
             {
                 var body = new Dictionary<string, object> { ["server"] = server.Text.Trim(), ["company_code"] = code.Text.Trim() };
-                if (branch.Visible && branch.SelectedItem is KeyValuePair<int, string> kv) body["branch_id"] = kv.Key;
+                int bid; if (branch.Visible && int.TryParse(branch.Value, out bid)) body["branch_id"] = bid;
                 var r = await Task.Run(() => agent.Call("setup", body));
                 if (r.Bool("ok")) { DialogResult = DialogResult.OK; Close(); return; }
                 string err = r.Str("error");
                 if (err == "choose_branch" && r.TryGetValue("branches", out var bl) && bl is ArrayList list)
                 {
                     branch.Items.Clear();
-                    foreach (var o in list) if (o is Dictionary<string, object> d) branch.Items.Add(new KeyValuePair<int, string>(d.Int("id"), d.Str("name")));
-                    branch.DisplayMember = "Value"; branch.Visible = branchLbl.Visible = true;
+                    foreach (var o in list) if (o is Dictionary<string, object> d) branch.Add(d.Int("id").ToString(), d.Str("name"));
+                    branch.Visible = branchLbl.Visible = true;
                     if (branch.Items.Count > 0) branch.SelectedIndex = 0;
                     msg.Text = "Точканы таңдап, қайта басыңыз.";
                 }
                 else msg.Text = MainForm.Human(err) + (r.Str("detail") != null ? " (" + r.Str("detail") + ")" : "");
             }
-            finally { ok.Enabled = true; ok.Text = "Кіру және деректі жүктеу"; UseWaitCursor = false; }
+            finally { ok.Enabled = true; ok.Text = "Кіру және деректі жүктеу"; ok.Invalidate(); UseWaitCursor = false; }
         }
     }
 }

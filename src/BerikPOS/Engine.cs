@@ -169,6 +169,11 @@ namespace BerikPOS
                 "extension_dir=\"" + ext + "\"",
                 "extension=mysqli", "extension=curl", "extension=mbstring", "extension=openssl", "extension=fileinfo", "extension=gd",
                 "short_open_tag=On",
+                // Жылдамдық: PHP файлдары әр сұрауда қайта компиляцияланбасын (OPcache), жол іздеу кэші
+                "zend_extension=opcache",
+                "opcache.enable=1", "opcache.enable_cli=1", "opcache.memory_consumption=96", "opcache.interned_strings_buffer=16",
+                "opcache.max_accelerated_files=10000", "opcache.validate_timestamps=1", "opcache.revalidate_freq=2",
+                "realpath_cache_size=4096K", "realpath_cache_ttl=600",
                 "display_errors=Off",
                 "log_errors=On",
                 "error_log=\"" + Path.Combine(Paths.Logs, "php.log").Replace('\\', '/') + "\"",
