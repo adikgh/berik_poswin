@@ -169,6 +169,16 @@ namespace BerikPOS
                 own.Navigate(e.Uri);
                 return;
             }
+            // Чек (order_print.php): терезені сайтқа байламай, өзіміз бөлек жасырын ашып басамыз.
+            // «Сақтау және чек шығару» чек терезесін ашқан бойда бетті қайта жүктейді (location.reload) —
+            // байланған терезе сонда үзіліп, чек шықпай қалатын. Бөлек ашылса, бет жаңарса да чек шығады
+            if (e.Uri.Contains("order_print") || (e.Uri.Contains("print") && e.Uri.StartsWith("http")))
+            {
+                e.Handled = true; // сайттың терезесі ашылмайды
+                string url = e.Uri;
+                BeginInvoke(new Action(() => { _ = PrintUrl(url); }));
+                return;
+            }
             var def = e.GetDeferral();
             try
             {
@@ -214,6 +224,44 @@ namespace BerikPOS
             }
             catch (Exception ex) { Log.W("newwindow: " + ex.Message); }
             finally { def.Complete(); }
+        }
+
+        // Чек бетін жасырын терезеде ашып, window.print() шақырылғанда (немесе бет жүктелген соң) диалогсыз басады
+        async Task PrintUrl(string url)
+        {
+            Log.W("print open: " + url);
+            var f = new Form { Text = "Berik POS", ShowInTaskbar = false, StartPosition = FormStartPosition.Manual, Size = new Size(600, 700), Location = new Point(-3000, -3000), FormBorderStyle = FormBorderStyle.None, Opacity = 0 };
+            var wv = new WebView2 { Dock = DockStyle.Fill };
+            f.Controls.Add(wv);
+            f.Show(this);
+            bool done = false;
+            try
+            {
+                await wv.EnsureCoreWebView2Async(env);
+                var cw = wv.CoreWebView2;
+                cw.NewWindowRequested += (s, a) => a.Handled = true;
+                cw.WindowCloseRequested += (s, a) => { }; // бет өзі жабам десе де — басып болғанша күтеміз
+                await cw.AddScriptToExecuteOnDocumentCreatedAsync("window.__berikPrint=window.print;window.print=function(){try{window.chrome.webview.postMessage('print')}catch(e){window.__berikPrint()}};window.close=function(){};");
+                var got = new TaskCompletionSource<bool>();
+                cw.WebMessageReceived += (s, a) => { if (a.TryGetWebMessageAsString() == "print") got.TrySetResult(true); };
+                cw.NavigationCompleted += async (s, a) =>
+                {
+                    if (!a.IsSuccess) { Log.W("print page error: " + a.WebErrorStatus); got.TrySetResult(false); return; }
+                    await Task.Delay(1500); // бет өзі print() шақырмаса да — жүктелген соң басамыз
+                    got.TrySetResult(true);
+                };
+                cw.Navigate(url);
+                var first = await Task.WhenAny(got.Task, Task.Delay(20000));
+                if (first == got.Task && got.Task.Result)
+                {
+                    done = true;
+                    await Task.Delay(300); // суреттер (логотип) жүктелсін
+                    await PrintSilent(cw, url.Contains("kind=kitchen"));
+                }
+                else Log.W("print timeout/fail: " + url);
+            }
+            catch (Exception ex) { Log.W("print url: " + ex.Message); }
+            finally { await Task.Delay(done ? 800 : 0); if (!f.IsDisposed) f.Close(); }
         }
 
         async Task PrintSilent(CoreWebView2 cw, bool kitchen = false)
